@@ -1,5 +1,6 @@
 # Physics-765-final-project
-repository for final project for physics 765
+## Topic of Interest 
+PennyLane makes it easy to design quantum circuits, but it doesn’t tell you how expensive those circuits would be on a fault-tolerant machine. We built a tool that inspects PennyLane circuits and estimates their fault-tolerant cost, allowing early stage comparison of circuit designs before running full resource estimators.
 
 By Max Bublik and Adi Ravi
 
