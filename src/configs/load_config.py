@@ -1,0 +1,8 @@
+import yaml
+from pathlib import Path
+
+
+def load_config(path: str):
+    config_path = Path(path)
+    with open(config_path, "r") as f:
+        return yaml.safe_load(f)

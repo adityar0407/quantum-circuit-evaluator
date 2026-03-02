@@ -1,0 +1,10 @@
+hardware:
+  native_gates: ["rx", "rz", "cx", "measure"]
+  connectivity: [[0,1], [1,2]]
+  topology: "line"
+
+ec:
+  code: "surface"
+  physical_error_rate: 0.001
+  logical_error_target: 0.000000000001
+  distance: 7
