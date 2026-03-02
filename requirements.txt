@@ -3,7 +3,7 @@ appnope==0.1.4
 asttokens==3.0.1
 attrs==25.4.0
 autograd==1.8.0
-autoray==0.8.2
+autoray==0.7.2
 beautifulsoup4==4.14.3
 bleach==6.2.0
 cachetools==6.2.6
@@ -82,6 +82,7 @@ pyLIQTR==1.2.1
 pyparsing==3.3.2
 python-dateutil==2.9.0.post0
 pytz==2025.2
+PyYAML==6.0.3
 pyzmq==27.1.0
 qiskit==2.2.3
 qiskit-aer==0.17.2
