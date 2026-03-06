@@ -1,7 +1,7 @@
-def export_qasm_stub():
-    return """OPENQASM 2.0;
-qreg q[3];
-cx q[0],q[1];
-rx(0.5) q[2];
-measure q[0] -> c[0];
-"""
+# Export circuit generated from pennylane to a standard OpenQASM string for easier readability and compatibility with compiler further down the pipeline 
+import pennylane as qml 
+
+def export_to_qasm(circuit): 
+    qasm_string = qml.to_openqasm(circuit)()
+    return qasm_string
+

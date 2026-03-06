@@ -1,15 +1,31 @@
-from configs.load_config import load_config
-from IR.export_qasm import export_qasm_stub
-from metrics.qasm_counter import count_gates_from_qasm
+from IR.circuit_loader import  input_test_circuit
+from IR.export_qasm import export_to_qasm
+
+circuit = input_test_circuit()
+
+qasm = export_to_qasm(circuit)
+print(qasm)
 
 
-def main():
-    config = load_config("src/configs/test.yaml")
-    qasm = export_qasm_stub()
-    counts = count_gates_from_qasm(qasm)
+# Validation for QASM to prevent errors from popping up downstream
+# from IR.validate_qasm import validate_qasm
 
-    print("Gate counts:", counts)
+# is_valid, result = validate_qasm(qasm)
+
+# print("Valid QASM:", is_valid)
+# print(result)
 
 
-if __name__ == "__main__":
-    main()
+
+# Only for file ingestion input 
+# from IR.qasm_ingestor import ingest_qasm_string
+
+# raw_qasm = export_to_qasm(circuit)
+# qasm = ingest_qasm_string(raw_qasm)
+
+# print(qasm)
+
+from IR.qasm_to_ir import qasm_to_ir
+
+ir_circuit = qasm_to_ir(qasm)
+print(ir_circuit)
