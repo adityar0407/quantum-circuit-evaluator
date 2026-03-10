@@ -25,7 +25,15 @@ print(qasm)
 
 # print(qasm)
 
+# Call the IR creation function and print the IR format result 
 from IR.qasm_to_ir import qasm_to_ir
 
 ir_circuit = qasm_to_ir(qasm)
 print(ir_circuit)
+
+from IR.IR_metadata_schema import extract_metadata
+
+meta = extract_metadata(ir_circuit)
+print(meta)
+
+

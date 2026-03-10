@@ -9,4 +9,3 @@ def input_test_circuit ():
         qml.CNOT(wires = [0,1])
         return qml.state()
     return circuit
-        
