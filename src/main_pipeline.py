@@ -1,6 +1,7 @@
 from configs.load_config import load_config
 from IR.export_qasm import export_qasm_stub
 from metrics.qasm_counter import count_gates_from_qasm
+from hardware.connectivity import is_connected
 
 
 def main():
