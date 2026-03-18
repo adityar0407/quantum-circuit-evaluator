@@ -8,7 +8,7 @@ def main():
     config = load_config("src/configs/test.yaml")
     qasm = export_qasm_stub()
     counts = count_gates_from_qasm(qasm)
-
+    
     print("Gate counts:", counts)
 
 

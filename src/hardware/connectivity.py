@@ -7,5 +7,5 @@ def is_connected(q1, q2, connectivity):
     if connectivity.endswith('.csv'):
         df = pd.read_csv(connectivity)
         connectivity = df.values.tolist()
-
+    
     return [q1, q2] in df or [q2, q1] in df
