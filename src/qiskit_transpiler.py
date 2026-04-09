@@ -3,7 +3,7 @@ from qiskit import transpile, QuantumCircuit
 from qiskit.transpiler import CouplingMap
 from qiskit_ibm_runtime import QiskitRuntimeService
 
-from error_correction.surface_codes import create_gate_cost_evaluator
+from error_correction.cost_eval import create_gate_cost_evaluator
 from error_correction.pass_managers import get_mapping_pm, get_optimization_pm
 
 def transpile_circuit_generic(circuit, optimization_level=3, backend_name=None, connectivity=None, native_gate_list=None):
@@ -19,6 +19,9 @@ def transpile_circuit_generic(circuit, optimization_level=3, backend_name=None, 
         transpiled_qc = transpile(circuit, optimization_level=optimization_level, coupling_map=connectivity, basis_gates=native_gate_list)
 
     return transpiled_qc
+
+
+
 
 def dynamic_weight_transpile(
     circuit: QuantumCircuit,
@@ -66,7 +69,7 @@ def dynamic_weight_transpile(
         
         # Check the new weight
         current_weight = cost_evaluator(current_circuit)
-        print(f"  -> Iteration {i} completed. New Circuit Weight: {current_weight}")
+        print(f"  -> Iteration {i + 1} completed. New Circuit Weight: {current_weight}")
         
         # Evaluate against the user's threshold
         if current_weight <= target_weight_threshold:

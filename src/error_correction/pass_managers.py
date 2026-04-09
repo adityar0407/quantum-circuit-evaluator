@@ -26,8 +26,8 @@ def get_optimization_pm(basis_gates: list[str] = None) -> PassManager:
     """
     # Default FT basis gates if none are provided
     if basis_gates is None:
-        basis_gates = ['u1', 'u2', 'u3', 'cx', 'swap', 't', 'tdg', 'h', 's']
-        
+        basis_gates = ['', 'u2', 'u3', 'cx', 'swap', 't', 'tdg', 'h', 's']
+    
     return PassManager([
         # Cancels self-inverse gates (like H-H or CX-CX) and pushes commuting gates
         CommutativeCancellation(),

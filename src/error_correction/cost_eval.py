@@ -20,8 +20,7 @@ def create_gate_cost_evaluator(
     """
     
     def evaluator(circuit: QuantumCircuit) -> float:
-        # count_ops() returns an OrderedDict of gate names and their frequencies
-        # Example: {'cx': 45, 't': 12, 'h': 5, 'measure': 3}
+        
         gate_counts = circuit.count_ops()
         
         total_cost = 0.0
