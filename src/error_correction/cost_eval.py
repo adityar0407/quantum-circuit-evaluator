@@ -38,3 +38,8 @@ def create_gate_cost_evaluator(
         return total_cost
         
     return evaluator
+
+
+## TODO : find the longest time for a qubit based on the number of gates and time for each gate. 
+## while that's happening, we can track probability of success for each qubit and use that as a given probability of success for the entire circuit. 
+### this also allows us to update a given inherit probability of a qubit which is a dynamic feature of qiskit already

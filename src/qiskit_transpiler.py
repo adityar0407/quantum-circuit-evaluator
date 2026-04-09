@@ -4,7 +4,7 @@ from qiskit.transpiler import CouplingMap
 from qiskit_ibm_runtime import QiskitRuntimeService
 
 from error_correction.cost_eval import create_gate_cost_evaluator
-from error_correction.pass_managers import get_mapping_pm, get_optimization_pm
+from error_correction.pass_managers import get_mapping_pm, make_basis_gates
 
 def transpile_circuit_generic(circuit, optimization_level=3, backend_name=None, connectivity=None, native_gate_list=None):
     """Uses the generic Qiskit transpiler with their premade pass managers."""
@@ -29,7 +29,7 @@ def dynamic_weight_transpile(
     cost_evaluator: Callable[[QuantumCircuit], float],
     target_weight_threshold: float,
     max_iterations: int = 5,
-    basis_gates: list = None
+    basis_gates: str = None
 ) -> Tuple[QuantumCircuit, float]:
     """
     Iteratively optimizes a mapped circuit until a target weight is achieved 
@@ -42,6 +42,9 @@ def dynamic_weight_transpile(
     mapping_pm = get_mapping_pm(coupling_map)
     current_circuit = mapping_pm.run(circuit)
     
+    print(f"current basis gates are based on {basis_gates}")
+
+    
     # Baseline Evaluation
     current_weight = cost_evaluator(current_circuit)
     print(f"Baseline Circuit Weight (Post-Mapping): {current_weight}")
@@ -50,8 +53,8 @@ def dynamic_weight_transpile(
         print("  -> Circuit already meets threshold after mapping.")
         return current_circuit, current_weight
 
-    # Setup Optimization Pass Manager
-    opt_pm = get_optimization_pm(basis_gates)
+    # translate to a naitive gate set for the given hardware to allow for more effective optimization passes.
+    opt_pm = make_basis_gates(basis_gates)
 
     # Dynamic Checking Loop
     print("Beginning dynamic optimization loop...")

@@ -19,7 +19,7 @@ def get_mapping_pm(coupling_map: CouplingMap) -> PassManager:
         BasicSwap(coupling_map)
     ])
 
-def get_optimization_pm(basis_gates: list[str] = None) -> PassManager:
+def make_basis_gates(basis_gates: list[str] = None) -> PassManager:
     """
     Creates a PassManager for the dynamic optimization loop.
     Focuses on reducing gate counts (especially single qubit gates) and depth.
@@ -27,10 +27,27 @@ def get_optimization_pm(basis_gates: list[str] = None) -> PassManager:
     # Default FT basis gates if none are provided
     if basis_gates is None:
         basis_gates = ['', 'u2', 'u3', 'cx', 'swap', 't', 'tdg', 'h', 's']
-    
+
+    if basis_gates is "IBM standard":
+        basis_gates = ["x", "sx", "rz", "ecr", "id", "measure", "reset"]
+    if basis_gates is "Trapped Ion":
+        basis_gates = ['rx', 'ry', 'rz', 'rxx', 'measure', 'reset']
+    if basis_gates is "Neutral Atom":
+        basis_gates = ['rx', 'ry', 'rz', 'cz', 'measure', 'reset']
     return PassManager([
         # Cancels self-inverse gates (like H-H or CX-CX) and pushes commuting gates
         CommutativeCancellation(),
         # Compresses adjacent single-qubit gates into the provided basis
         Optimize1qGatesDecomposition(basis=basis_gates)
+    ])
+
+def get_optimization_pm(basis_gates: list[str] = None) -> PassManager:
+    """
+    basic optimization pass manager, will improve and make different ones as we go
+    """
+
+    return PassManager([
+        # Cancels self-inverse gates (like H-H or CX-CX) and pushes commuting gates
+        CommutativeCancellation(),
+        
     ])
