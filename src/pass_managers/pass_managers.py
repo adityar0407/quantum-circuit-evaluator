@@ -34,6 +34,8 @@ def make_basis_gates(basis_gates: list[str] = None) -> PassManager:
         basis_gates = ['rx', 'ry', 'rz', 'rxx', 'measure', 'reset']
     if basis_gates is "Neutral Atom":
         basis_gates = ['rx', 'ry', 'rz', 'cz', 'measure', 'reset']
+
+        
     return PassManager([
         # Cancels self-inverse gates (like H-H or CX-CX) and pushes commuting gates
         CommutativeCancellation(),
