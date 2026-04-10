@@ -4,6 +4,9 @@ from qiskit.circuit.library import (
     RXGate, RZGate, RYGate, CXGate, CZGate, RXXGate, TGate, HGate, SGate, Measure
 )
 
+# TODO: NEED TO INCLUDE EVERY GATE FOR A GIVEN GATE SET IN THE TARGET OTHERWISE WON'T WORK
+
+
 def create_custom_target(
     ## TODO: see if I can create local variables that just call on the coupling map instead of having to define them in the main pipeline and then 
     # pass them in here.
@@ -100,7 +103,7 @@ def get_benchmark_target(architecture: str, num_qubits: int, coupling_map: Coupl
     elif architecture.lower() == "logical_surface_code":
         # Theoretical Fault-Tolerant profile. TODO: find more accurate specs based on current literature for surface code implementations, 
         # these are just illustrative placeholders.
-        
+
         # Cliffords (H, S, CX) are cheap/fast via lattice surgery.
         # Non-Cliffords (T) are incredibly slow/expensive due to magic state distillation.
         gate_specs = {
