@@ -7,7 +7,10 @@ from error_correction.cost_eval import create_gate_cost_evaluator
 from error_correction.pass_managers import get_mapping_pm, make_basis_gates
 
 def transpile_circuit_generic(circuit, optimization_level=3, backend_name=None, connectivity=None, native_gate_list=None):
-    """Uses the generic Qiskit transpiler with their premade pass managers."""
+    """Uses the generic Qiskit transpiler with their premade pass managers.
+    This is just a baseline for comparison, utilizing the naitive setup qiskit has
+    """
+    
     assert (backend_name is not None) or ((connectivity is not None) and (native_gate_list is not None)), \
         "Either entire backend or the connectivity and native gate set must be provided."
 
@@ -21,62 +24,62 @@ def transpile_circuit_generic(circuit, optimization_level=3, backend_name=None, 
     return transpiled_qc
 
 
+## DEPRECIATED utilizing a new workflow instead
 
-
-def dynamic_weight_transpile(
-    circuit: QuantumCircuit,
-    coupling_map: CouplingMap,
-    cost_evaluator: Callable[[QuantumCircuit], float],
-    target_weight_threshold: float,
-    max_iterations: int = 5,
-    basis_gates: str = None
-) -> Tuple[QuantumCircuit, float]:
-    """
-    Iteratively optimizes a mapped circuit until a target weight is achieved 
-    or convergence is reached.
-    """
+# def dynamic_weight_transpile(
+#     circuit: QuantumCircuit,
+#     coupling_map: CouplingMap,
+#     cost_evaluator: Callable[[QuantumCircuit], float],
+#     target_weight_threshold: float,
+#     max_iterations: int = 5,
+#     basis_gates: str = None
+# ) -> Tuple[QuantumCircuit, float]:
+#     """
+#     Iteratively optimizes a mapped circuit until a target weight is achieved 
+#     or convergence is reached.
+#     """
     
-    # We must satisfy the connectivity map BEFORE evaluating the cost
-    # since all optimization passes assume the circuit is already mapped to the hardware topology
-    print("Mapping circuit to logical topology...")
-    mapping_pm = get_mapping_pm(coupling_map)
-    current_circuit = mapping_pm.run(circuit)
+#     # We must satisfy the connectivity map BEFORE evaluating the cost
+#     # since all optimization passes assume the circuit is already mapped to the hardware topology
+#     print("Mapping circuit to logical topology...")
+#     mapping_pm = get_mapping_pm(coupling_map)
+#     current_circuit = mapping_pm.run(circuit)
     
-    print(f"current basis gates are based on {basis_gates}")
+#     print(f"current basis gates are based on {basis_gates}")
 
     
-    # Baseline Evaluation
-    current_weight = cost_evaluator(current_circuit)
-    print(f"Baseline Circuit Weight (Post-Mapping): {current_weight}")
+#     # Baseline Evaluation
+#     current_weight = cost_evaluator(current_circuit)
+#     print(f"Baseline Circuit Weight (Post-Mapping): {current_weight}")
     
-    if current_weight <= target_weight_threshold:
-        print("  -> Circuit already meets threshold after mapping.")
-        return current_circuit, current_weight
+#     if current_weight <= target_weight_threshold:
+#         print("  -> Circuit already meets threshold after mapping.")
+#         return current_circuit, current_weight
 
-    # translate to a naitive gate set for the given hardware to allow for more effective optimization passes.
-    opt_pm = make_basis_gates(basis_gates)
+#     # translate to a naitive gate set for the given hardware to allow for more effective optimization passes.
+#     opt_pm = make_basis_gates(basis_gates)
 
-    # Dynamic Checking Loop
-    print("Beginning dynamic optimization loop...")
-    for i in range(max_iterations):
-        # Run one pass of optimization
-        new_circuit = opt_pm.run(current_circuit)
+#     # Dynamic Checking Loop
+#     print("Beginning dynamic optimization loop...")
+#     for i in range(max_iterations):
+#         # Run one pass of optimization
+#         new_circuit = opt_pm.run(current_circuit)
         
-        # Check convergence (if the passes didn't change anything, stop early)
-        # will need to adjust this to be more robust for larger circuits (e.g., by comparing weights instead of exact circuit equality)
-        if new_circuit == current_circuit:
-            print(f"  -> Optimization converged at iteration {i + 1}. Stopping.")
-            break
+#         # Check convergence (if the passes didn't change anything, stop early)
+#         # will need to adjust this to be more robust for larger circuits (e.g., by comparing weights instead of exact circuit equality)
+#         if new_circuit == current_circuit:
+#             print(f"  -> Optimization converged at iteration {i + 1}. Stopping.")
+#             break
             
-        current_circuit = new_circuit
+#         current_circuit = new_circuit
         
-        # Check the new weight
-        current_weight = cost_evaluator(current_circuit)
-        print(f"  -> Iteration {i + 1} completed. New Circuit Weight: {current_weight}")
+#         # Check the new weight
+#         current_weight = cost_evaluator(current_circuit)
+#         print(f"  -> Iteration {i + 1} completed. New Circuit Weight: {current_weight}")
         
-        # Evaluate against the user's threshold
-        if current_weight <= target_weight_threshold:
-            print("  -> Target weight achieved! Halting optimization early.")
-            break
+#         # Evaluate against the user's threshold
+#         if current_weight <= target_weight_threshold:
+#             print("  -> Target weight achieved! Halting optimization early.")
+#             break
 
-    return current_circuit, current_weight
+#     return current_circuit, current_weight
