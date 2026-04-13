@@ -4,6 +4,8 @@ from qiskit.transpiler.passes import (
     Depth,
     Size
 )
+
+
 from qiskit.transpiler import PassManager
 
 
@@ -15,6 +17,8 @@ def get_optimization_pm() -> PassManager:
     Iteratively shrinks the circuit by removing redundancies. 
     This is the core of the dynamic transpiler loop.
     """
+    
+    
     return PassManager([
         CommutativeCancellation(),
         RemoveResetInZeroState(),

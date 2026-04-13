@@ -9,3 +9,8 @@ Implement a working pipeline from an example using all code [pull from main to g
 get viable numbers for the target! time and probability of success that makes sense
 
 Ensure the metrics_evaluator functions correct
+
+
+Limit of nisq base connectivity mapping compared to fault tolerant connectivity mapping:
+how does the design of nisq based circuits change in a fault tolerant regime
+explore how different connectivity mappings change benchmarking 
