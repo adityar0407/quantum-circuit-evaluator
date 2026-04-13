@@ -21,3 +21,7 @@ def get_optimization_pm() -> PassManager:
         # You can add passes like Collect2qBlocks and ConsolidateBlocks here later
         # to resynthesize complex 2-qubit interactions.
     ])
+    
+
+
+

@@ -6,7 +6,7 @@ from qiskit import QuantumCircuit
 from qiskit.transpiler import CouplingMap
 
 # Import from the custom modules we created
-from error_correction.surface_codes import create_gate_cost_evaluator
+from pass_managers.cost_eval import create_gate_cost_evaluator
 from qiskit_transpiler import dynamic_weight_transpile
 
 def test_case():
