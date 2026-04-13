@@ -1,4 +1,15 @@
-# Connectivity map that generates a k nearest scheme 
+# import pandas as pd
+
+# def is_connected(q1, q2, connectivity):
+#     df = None
+#     if q1 == q2:
+#         raise ValueError("Cannot check connectivity between the same qubits.")
+#     if connectivity.endswith('.csv'):
+#         df = pd.read_csv(connectivity)
+#         connectivity = df.values.tolist()
+    
+#     return [q1, q2] in df or [q2, q1] in df
+
 from qiskit.transpiler import CouplingMap
 
 
@@ -11,8 +22,9 @@ def _block_edges(n, m, k):
             q = r * m + c
 
             # Check all sites within Manhattan radius k.
-            for dr in range(-k, k + 1):
-                for dc in range(-k, k + 1):
+            for dr in range(0, k + 1):
+                startdc = 1 if dr == 0 else -(k - dr)
+                for dc in range(startdc, k - dr + 1):
                     dist = abs(dr) + abs(dc)
 
                     # Skip itself and anything outside the cutoff.
@@ -27,7 +39,6 @@ def _block_edges(n, m, k):
 
                         # Sort so each undirected edge is only stored once.
                         edges.add(tuple(sorted((q, q2))))
-
     return sorted(edges)
 
 
@@ -143,4 +154,4 @@ if __name__ == "__main__":
     print("Is connected :", cmap.is_connected())
 
     img = cmap.draw()
-    img.show()  
+    img.show()
