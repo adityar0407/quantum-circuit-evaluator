@@ -1,16 +1,37 @@
-# import pandas as pd
-
-# def is_connected(q1, q2, connectivity):
-#     df = None
-#     if q1 == q2:
-#         raise ValueError("Cannot check connectivity between the same qubits.")
-#     if connectivity.endswith('.csv'):
-#         df = pd.read_csv(connectivity)
-#         connectivity = df.values.tolist()
-    
-#     return [q1, q2] in df or [q2, q1] in df
-
+from __future__ import annotations
+from pathlib import Path
+import pandas as pd 
 from qiskit.transpiler import CouplingMap
+
+CONNECTIVITY_MAP_DIR = Path(__file__).resolve().parents[1] / "connectivity_maps"
+
+
+def load_coupling_map_from_csv(csv_path: str | Path) -> CouplingMap:
+    """
+    Load a Qiskit CouplingMap from a CSV edge list.
+
+    Expected CSV columns:
+    Qubit_1,Qubit_2
+    """
+    df = pd.read_csv(csv_path)
+    coupling_list = df[["Qubit_1", "Qubit_2"]].astype(int).values.tolist()
+    return CouplingMap(couplinglist=coupling_list)
+
+
+
+# Build coupling map for IBM Fez 
+def load_ibm_fez_coupling_map() -> CouplingMap:
+    """Load the IBM Fez heavy-hex coupling map from CSV."""
+    return load_coupling_map_from_csv(
+        CONNECTIVITY_MAP_DIR / "ibm_fez_connectivity.csv"
+    )
+
+# Build coupling map for IBM Torino 
+def load_ibm_torino_coupling_map() -> CouplingMap:
+    """Load the IBM Torino heavy-hex coupling map from CSV."""
+    return load_coupling_map_from_csv(
+        CONNECTIVITY_MAP_DIR / "ibm_torino_connectivity.csv"
+    )
 
 
 def _block_edges(n, m, k):
@@ -117,41 +138,50 @@ def k_nearest_tiled_coupling_map(
     return cmap
 
 
-def build_pipeline_coupling_map(
-    n_blocks_row: int,
-    n_blocks_col: int,
-    n: int,
-    m: int,
-    k_intra: int,
+def build_ft_style_coupling_map(
+    k_intra: int = 2,
     k_inter: int = 1,
-    connector_local: int = 0,
 ) -> CouplingMap:
-    """Build the coupling map used by the main pipeline."""
-    return k_nearest_tiled_coupling_map(
-        n_blocks_row=n_blocks_row,
-        n_blocks_col=n_blocks_col,
-        n=n,
-        m=m,
-        k_intra=k_intra,
-        k_inter=k_inter,
-        connector_local=connector_local,
-    )
+    """
+    Build the custom multi-block k-nearest connectivity map used as the
+    FT-style architecture model.
 
-# Example 
-if __name__ == "__main__":
-    cmap = build_pipeline_coupling_map(
+    This uses the same 2x2 tiled 10x10-block structure from main_pipeline.py.
+    It is a structural connectivity model only, not a full surface-code,
+    decoder, or noise simulation.
+    """
+    return k_nearest_tiled_coupling_map(
         n_blocks_row=2,
         n_blocks_col=2,
-        n=3,
-        m=3,
-        k_intra=1,
-        k_inter=1,
+        n=10,
+        m=10,
+        k_intra=k_intra,
+        k_inter=k_inter,
         connector_local=0,
     )
 
-    print("Total qubits :", cmap.size())
-    print("Total edges  :", len(cmap.get_edges()))
-    print("Is connected :", cmap.is_connected())
 
-    img = cmap.draw()
-    img.show()
+
+def get_benchmark_coupling_maps() -> dict[str, CouplingMap]:
+    """
+    Return all coupling maps used in the main NISQ-vs-FT-style benchmark.
+    """
+    return {
+        "IBM Fez heavy-hex": load_ibm_fez_coupling_map(),
+        "IBM Torino heavy-hex": load_ibm_torino_coupling_map(),
+        "Custom FT-style 2x2 tiled k-nearest": build_ft_style_coupling_map(
+            k_intra=2,
+            k_inter=1,
+        ),
+    }
+
+
+if __name__ == "__main__":
+    maps = get_benchmark_coupling_maps()
+
+    for name, cmap in maps.items():
+        print(name)
+        print("Total qubits :", cmap.size())
+        print("Total edges  :", len(cmap.get_edges()))
+        print("Is connected :", cmap.is_connected())
+        print()
