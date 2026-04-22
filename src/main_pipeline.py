@@ -1,12 +1,8 @@
-# Standard library
 from pathlib import Path
-import time
 
 # Third-party libraries
 import pandas as pd
-import matplotlib.pyplot as plt
 from qiskit import QuantumCircuit
-from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
 
 # Local project imports
 from IR.circuit_loader import input_test_circuit
@@ -14,12 +10,15 @@ from IR.export_qasm import export_to_qasm
 from IR.qasm_ingestor import ingest_qasm_string
 from IR.qasm_to_ir import qasm_to_ir
 from IR.validate_qasm import validate_qasm
-from hardware.connectivity import (
-    get_benchmark_coupling_maps,
-    load_ibm_fez_coupling_map,
-    load_ibm_torino_coupling_map,
-    k_nearest_tiled_coupling_map,
-)
+from hardware.architecture_profiles import get_benchmark_architecture_profiles
+from hardware.connectivity import get_benchmark_coupling_maps
+from metrics.metrics_evaluator import evaluate_circuit_metrics
+from pass_managers.cost_eval import create_gate_cost_evaluator
+from pass_managers.initializer import get_init_pm
+from pass_managers.layout_n_routing import get_layout_routing_pm
+from pass_managers.optimizer import get_optimization_pm
+from pass_managers.translator import get_translation_pm
+from target_creation.target import get_benchmark_target
 
 
 # Initialize and build circuit
@@ -55,60 +54,66 @@ def benchmark_all_connectivity_maps(qiskit_circuit: QuantumCircuit) -> pd.DataFr
     Benchmark the same logical circuit on IBM Fez, IBM Torino, and the custom
     FT-style k-nearest tiled map.
     """
-    fez_cmap = load_ibm_fez_coupling_map()
-    torino_cmap = load_ibm_torino_coupling_map()
-
-    ft_cmap = k_nearest_tiled_coupling_map(
-        n_blocks_row=2,
-        n_blocks_col=2,
-        n=10,
-        m=10,
-        k_intra=2,
-        k_inter=1,
-        connector_local=0,
-    )
-
-    coupling_maps = {
-        "IBM Fez heavy-hex": fez_cmap,
-        "IBM Torino heavy-hex": torino_cmap,
-        "Custom FT-style tiled k-nearest": ft_cmap,
-    }
-
-    basis_gates_by_architecture = {
-    "IBM Fez heavy-hex": ["rz", "sx", "x", "cx", "id", "swap"],
-    "IBM Torino heavy-hex": ["rz", "sx", "x", "cx", "id", "swap"],
-    "Custom FT-style tiled k-nearest": ["h", "s", "sdg", "cx", "t", "tdg", "swap"],
-}
-
+    architectures = get_benchmark_architecture_profiles()
 
     results = []
 
-    for architecture_name, coupling_map in coupling_maps.items():
-        basis_gates = basis_gates_by_architecture[architecture_name]
-        
-        pass_manager = generate_preset_pass_manager(
-            optimization_level=2,
-            basis_gates=basis_gates,
+    for architecture in architectures:
+        coupling_map = architecture.coupling_map
+        target_data = get_benchmark_target(
+            architecture.profile,
+            num_qubits=coupling_map.size(),
             coupling_map=coupling_map,
+            backend_name=architecture.backend_name,
+            fallback_basis_gates=architecture.fallback_basis_gates,
+        )
+        target = target_data.target
+        basis_gates = target_data.basis_gates
+        cost_evaluator = create_gate_cost_evaluator(
+            gate_weights=architecture.gate_weights,
+            depth_weight=architecture.depth_weight,
+            unmapped_gate_penalty=architecture.unmapped_gate_penalty,
         )
 
-
-        transpiled_circuit = pass_manager.run(qiskit_circuit)
+        transpiled_circuit = get_init_pm(basis_gates).run(qiskit_circuit)
+        transpiled_circuit = get_layout_routing_pm(coupling_map).run(transpiled_circuit)
+        transpiled_circuit = get_translation_pm(
+            architecture.profile,
+            basis_gates=basis_gates,
+        ).run(transpiled_circuit)
+        transpiled_circuit = get_optimization_pm().run(transpiled_circuit)
         counts = transpiled_circuit.count_ops()
+        target_metrics = evaluate_circuit_metrics(
+            transpiled_circuit,
+            target,
+        )
 
         results.append(
             {
-                "architecture": architecture_name,
+                "architecture": architecture.name,
                 "physical_qubits": coupling_map.size(),
                 "directed_edges": len(coupling_map.get_edges()),
                 "input_depth": qiskit_circuit.depth(),
                 "input_gates": qiskit_circuit.size(),
                 "transpiled_depth": transpiled_circuit.depth(),
                 "transpiled_gates": transpiled_circuit.size(),
+                "model_weighted_score": cost_evaluator(transpiled_circuit),
+                "cost_model_source": architecture.cost_model_source,
+                "independent_error_success_proxy": (
+                    target_metrics.independent_error_success_proxy
+                ),
+                "scheduled_duration_estimate_seconds": (
+                    target_metrics.scheduled_duration_estimate_seconds
+                ),
+                "missing_error_data_count": target_metrics.missing_error_data_count,
+                "missing_duration_data_count": target_metrics.missing_duration_data_count,
+                "unsupported_operation_count": target_metrics.unsupported_operation_count,
                 "cx_count": counts.get("cx", 0),
                 "swap_count": counts.get("swap", 0),
                 "t_count": counts.get("t", 0) + counts.get("tdg", 0),
                 "basis_gates": ", ".join(basis_gates),
+                "target_source": target_data.target_source,
+                "pass_manager": "local pass managers",
             }
         )
 
@@ -131,6 +136,8 @@ def save_connectivity_map_drawings():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     for architecture_name, coupling_map in coupling_maps.items():
+        import matplotlib.pyplot as plt
+
         safe_name = (
             architecture_name.lower()
             .replace(" ", "_")
@@ -161,6 +168,8 @@ def plot_and_save(
     filename: str,
     count_t_gates: bool = False,
 ):
+    import matplotlib.pyplot as plt
+
     num_cols = 3 if count_t_gates else 2
     fig, axes = plt.subplots(1, num_cols, figsize=(6 * num_cols, 5))
 
@@ -505,4 +514,3 @@ if __name__ == "__main__":
 # To run the script:
 # Ensure your build_pipeline_coupling_map function is loaded, then call:
 # results_df = benchmark_qft_connectivity(max_k=5, n_dim=10, m_dim=10)
-

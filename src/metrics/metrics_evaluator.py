@@ -1,20 +1,46 @@
-from typing import Tuple
+from __future__ import annotations
+
+from dataclasses import dataclass
+
 from qiskit.circuit import QuantumCircuit
 from qiskit.transpiler import Target
 
-def evaluate_circuit_metrics(circuit: QuantumCircuit, target: Target) -> Tuple[float, float]:
+
+@dataclass(frozen=True)
+class CircuitMetrics:
     """
-    Evaluates a transpiled quantum circuit against a hardware Target to find
-    the Expected Success Probability (ESP) and total execution time.
+    Metrics that depend on optional Target instruction properties.
+
+    A None value means the target did not define enough data for that metric.
+    """
+
+    independent_error_success_proxy: float | None
+    scheduled_duration_estimate_seconds: float | None
+    missing_error_data_count: int
+    missing_duration_data_count: int
+    unsupported_operation_count: int
+
+
+def evaluate_circuit_metrics(circuit: QuantumCircuit, target: Target) -> CircuitMetrics:
+    """
+    Evaluate first-order target-dependent metrics for a mapped circuit.
+
+    The success proxy multiplies independent per-instruction success
+    probabilities, when target errors are defined. The duration estimate tracks
+    per-qubit clock times, when target durations are defined.
     
     Args:
         circuit: The mapped/routed QuantumCircuit.
-        target: The Qiskit Target object containing hardware specs.
+        target: The Qiskit Target object containing instruction properties.
         
     Returns:
-        A tuple of (success_probability, total_duration_in_seconds).
+        CircuitMetrics with None for metrics whose required target properties
+        are missing.
     """
-    expected_success_prob = 1.0
+    independent_error_success_proxy = 1.0
+    missing_error_data_count = 0
+    missing_duration_data_count = 0
+    unsupported_operation_count = 0
     
     # Track the current "clock time" for each physical qubit
     # e.g., {0: 0.0, 1: 300e-9, 2: 0.0}
@@ -31,21 +57,27 @@ def evaluate_circuit_metrics(circuit: QuantumCircuit, target: Target) -> Tuple[f
         # (circuit.data stores Qubit objects, we need their integer IDs)
         q_args = tuple(circuit.find_bit(q).index for q in inst.qubits)
         
-        # Look up this exact gate and qubit combination in the target
+        # Look up this exact gate and qubit combination in the target.
         if gate_name in target and q_args in target[gate_name]:
             props = target[gate_name][q_args]
-            # Use 0.0 if the property is missing (perfect gate assumption)
-            error = props.error if getattr(props, 'error', None) is not None else 0.0
-            duration = props.duration if getattr(props, 'duration', None) is not None else 0.0
         else:
-            # PENALTY: If the transpiler left an unmapped or illegal gate in the circuit
-            error = 1.0   # Guaranteed failure
+            unsupported_operation_count += 1
+            missing_error_data_count += 1
+            missing_duration_data_count += 1
+            continue
+
+        if props is None or getattr(props, "error", None) is None:
+            missing_error_data_count += 1
+        else:
+            independent_error_success_proxy *= 1.0 - props.error
+
+        if props is None or getattr(props, "duration", None) is None:
+            missing_duration_data_count += 1
             duration = 0.0
-            
-        # 1. Update Probability
-        expected_success_prob *= (1.0 - error)
+        else:
+            duration = props.duration
         
-        # 2. Update Execution Time (Critical Path)
+        # Update the scheduled duration estimate critical path.
         # The gate can only execute once ALL involved qubits are free
         start_time = max(qubit_times[q] for q in q_args)
         end_time = start_time + duration
@@ -54,7 +86,18 @@ def evaluate_circuit_metrics(circuit: QuantumCircuit, target: Target) -> Tuple[f
         for q in q_args:
             qubit_times[q] = end_time
             
-    # The total circuit execution time is the time the very last qubit finishes
-    total_time = max(qubit_times.values())
+    if missing_error_data_count:
+        independent_error_success_proxy = None
+
+    # The total circuit execution time is the time the very last qubit finishes.
+    scheduled_duration_estimate_seconds = None
+    if not missing_duration_data_count:
+        scheduled_duration_estimate_seconds = max(qubit_times.values())
     
-    return expected_success_prob, total_time
+    return CircuitMetrics(
+        independent_error_success_proxy=independent_error_success_proxy,
+        scheduled_duration_estimate_seconds=scheduled_duration_estimate_seconds,
+        missing_error_data_count=missing_error_data_count,
+        missing_duration_data_count=missing_duration_data_count,
+        unsupported_operation_count=unsupported_operation_count,
+    )
