@@ -1,120 +1,89 @@
-from typing import Dict, Any, List, Tuple
-from qiskit.transpiler import Target, InstructionProperties, CouplingMap
-from qiskit.circuit.library import (
-    RXGate, RZGate, RYGate, CXGate, CZGate, RXXGate, TGate, HGate, SGate, Measure
-)
+from qiskit.transpiler import Target, InstructionProperties
+from qiskit.circuit.library import HGate, SGate, SdgGate, TGate, TdgGate, CXGate, IGate
+from hardware.connectivity import k_nearest_tiled_coupling_map
 
-# TODO: NEED TO INCLUDE EVERY GATE FOR A GIVEN GATE SET IN THE TARGET OTHERWISE WON'T WORK
+# Import your existing function (if running in a separate file)
+# from hardware.connectivity import k_nearest_tiled_coupling_map
 
-
-def create_custom_target(
-    ## TODO: see if I can create local variables that just call on the coupling map instead of having to define them in the main pipeline and then 
-    # pass them in here.
-    num_qubits: int,
-    basis_gates: List[Any],
-    gate_specs: Dict[str, Dict[str, float]],
-    coupling_map: CouplingMap = None
+def build_dynamic_ft_target(
+    # Topology parameters
+    n_blocks_row: int = 2,
+    n_blocks_col: int = 2,
+    n: int = 10,
+    m: int = 10,
+    k_intra: int = 2,
+    k_inter: int = 1,
+    connector_local: int = 0,
+    
+    # Single-qubit gate properties
+    sq_error: float = 1e-4,
+    sq_duration: float = 50e-9,
+    
+    # Intra-block (local) 2-qubit gate properties
+    intra_cx_error: float = 1e-3,
+    intra_cx_duration: float = 200e-9,
+    
+    # Inter-block (network/remote) 2-qubit gate properties
+    inter_cx_error: float = 1e-2,
+    inter_cx_duration: float = 1000e-9,
 ) -> Target:
     """
-    Creates a highly customizable Qiskit Target for user-defined architectures.
-    
-    Args:
-        num_qubits: Total number of qubits in the system.
-        basis_gates: List of Qiskit gate classes (e.g., [RXGate, CXGate]).
-        gate_specs: Dictionary mapping gate names to their 'duration' and 'error'.
-                    Example: {'cx': {'duration': 300e-9, 'error': 0.01}}
-        coupling_map: The allowed connectivity. If None, assumes all-to-all.
-        
-    Returns:
-        A configured Qiskit Target object.
+    Build a Qiskit Target for a tiled FT architecture with distinct 
+    intra-block and inter-block error rates and durations.
     """
+    # 1. Generate the underlying topology
+    cmap = k_nearest_tiled_coupling_map(
+        n_blocks_row=n_blocks_row,
+        n_blocks_col=n_blocks_col,
+        n=n,
+        m=m,
+        k_intra=k_intra,
+        k_inter=k_inter,
+        connector_local=connector_local
+    )
+    
+    num_qubits = cmap.size()
+    n_block = n * m  # Number of qubits in a single FT computer
+    
+    # 2. Initialize the Target
     target = Target(num_qubits=num_qubits)
-    print(f"Creating custom target with {num_qubits} qubits and basis gates: {[gate().name for gate in basis_gates]}")
-    print("if no coupling map is provided, the target will assume all-to-all connectivity between qubits.")
-    print("if no specs are provided for a given gate, it will be assumed to be perfect and instantaneous (duration=0.0, error=0.0)")
-    # Define the edges for 2-qubit gates based on the coupling map
-    if coupling_map:
-        ## TODO: see if adi can create a callable for the coupling map so i don't ahve to call get_edges in here too
-        edges = list(coupling_map.get_edges())
-    else:
-        # All-to-all connectivity if no map is provided
-        edges = [(i, j) for i in range(num_qubits) for j in range(num_qubits) if i != j]
-        
-    for gate_class in basis_gates:
-        gate_name = gate_class().name
-        
-        # Check if the user provided specs for this gate; if not, assume perfect/instant
-        specs = gate_specs.get(gate_name, {'duration': 0.0, 'error': 0.0})
-        duration = specs['duration']
-        error = specs['error']
-        
-        props = InstructionProperties(duration=duration, error=error)
-        
-        if gate_class().num_qubits == 1:
-            # Apply 1-qubit gates to all individual qubits
-            instruction_map = {(q,): props for q in range(num_qubits)}
-        elif gate_class().num_qubits == 2:
-            # Apply 2-qubit gates only to connected edges
-            instruction_map = {edge: props for edge in edges}
-        else:
-            continue # Skip 3+ qubit gates for this simple builder. TODO: maybe add support for multi-qubit gates in the future.
-            
-        target.add_instruction(gate_class(), instruction_map)
-        
-    # Always add measurement capabilities (assuming standard error/duration)
-    measure_props = InstructionProperties(duration=1e-6, error=0.02)
-    target.add_instruction(Measure(), {(q,): measure_props for q in range(num_qubits)})
-        
-    return target
-
-
-def get_benchmark_target(architecture: str, num_qubits: int, coupling_map: CouplingMap = None) -> Target:
-    """
-    Returns a pre-configured Target for specific quantum hardware modalities.
-    Durations are in seconds, errors are probabilities (0.0 to 1.0).
-    """
     
-    if architecture.lower() == "superconducting":
-        # Fast execution times, moderate error rates, limited connectivity
-        # Single qubit gates ~30ns, Two qubit gates ~300ns
-        gate_specs = {
-            'rz': {'duration': 0.0, 'error': 0.0},           # Virtual Z is free
-            'rx': {'duration': 30e-9, 'error': 0.001},       # 0.1% error
-            'cx': {'duration': 300e-9, 'error': 0.01}        # 1.0% error
-        }
-        return create_custom_target(
-            num_qubits, [RZGate, RXGate, CXGate], gate_specs, coupling_map
-        )
-        
-    elif architecture.lower() == "trapped_ion":
-        # TODO: find more accurate specs for trapped ion systems, these are just placeholders based on general knowledge of the field.
-        # Slow execution times, very low error rates, native all-to-all connectivity
-        # Single qubit gates ~10 microseconds, Two qubit gates ~100 microseconds
-        gate_specs = {
-            'rz': {'duration': 0.0, 'error': 0.0},
-            'rx': {'duration': 10e-6, 'error': 0.0001},      # 0.01% error
-            'rxx': {'duration': 100e-6, 'error': 0.005}      # 0.5% error
-        }
-        # Trapped ions typically feature all-to-all connectivity natively
-        return create_custom_target(
-            num_qubits, [RZGate, RXGate, RXXGate], gate_specs, coupling_map=None 
-        )
-        
-    elif architecture.lower() == "logical_surface_code":
-        # Theoretical Fault-Tolerant profile. TODO: find more accurate specs based on current literature for surface code implementations, 
-        # these are just illustrative placeholders.
+    # 3. Define the standard FT single-qubit Gate Set (Clifford + T)
+    sq_props = {
+        (q,): InstructionProperties(error=sq_error, duration=sq_duration)
+        for q in range(num_qubits)
+    }
+    
+    target.add_instruction(IGate(), sq_props)
+    target.add_instruction(HGate(), sq_props)
+    target.add_instruction(SGate(), sq_props)
+    target.add_instruction(SdgGate(), sq_props)
+    target.add_instruction(TGate(), sq_props)
+    target.add_instruction(TdgGate(), sq_props)
 
-        # Cliffords (H, S, CX) are cheap/fast via lattice surgery.
-        # Non-Cliffords (T) are incredibly slow/expensive due to magic state distillation.
-        gate_specs = {
-            'h': {'duration': 1e-6, 'error': 1e-8},
-            's': {'duration': 1e-6, 'error': 1e-8},
-            'cx': {'duration': 2e-6, 'error': 1e-7},
-            't': {'duration': 50e-6, 'error': 1e-6}  # 25x slower than a CX
-        }
-        return create_custom_target(
-            num_qubits, [HGate, SGate, CXGate, TGate], gate_specs, coupling_map
-        )
+    # 4. Define the 2-qubit operations (CX) mapping based on edge type
+    cx_props = {}
+    
+    for edge in cmap.get_edges():
+        q1, q2 = edge
         
-    else:
-        raise ValueError(f"Unknown architecture profile: {architecture}")
+        # Determine which block each qubit belongs to using integer division
+        block_q1 = q1 // n_block
+        block_q2 = q2 // n_block
+        
+        if block_q1 == block_q2:
+            # Intra-block connection (inside the same computer)
+            cx_props[(q1, q2)] = InstructionProperties(
+                error=intra_cx_error, 
+                duration=intra_cx_duration
+            )
+        else:
+            # Inter-block connection (network link between computers)
+            cx_props[(q1, q2)] = InstructionProperties(
+                error=inter_cx_error, 
+                duration=inter_cx_duration
+            )
+            
+    target.add_instruction(CXGate(), cx_props)
+    
+    return target

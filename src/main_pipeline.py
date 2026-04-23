@@ -9,7 +9,7 @@ from qiskit import QuantumCircuit
 from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
 
 # Local project imports
-from IR.circuit_loader import input_test_circuit
+from IR.circuit_loader import input_test_circuit, get_toffoli_cascade
 from IR.export_qasm import export_to_qasm
 from IR.qasm_ingestor import ingest_qasm_string
 from IR.qasm_to_ir import qasm_to_ir
@@ -20,6 +20,8 @@ from hardware.connectivity import (
     load_ibm_torino_coupling_map,
     k_nearest_tiled_coupling_map,
 )
+from target_creation.target import build_dynamic_ft_target
+
 
 
 # Initialize and build circuit
@@ -192,30 +194,122 @@ def plot_and_save(
     plt.savefig(filename, dpi=300, bbox_inches="tight")
     plt.close()
 
+def iterate_circuit_connectivities(circuit: QuantumCircuit):
+    # go through a series of various connectivities and benchmark the same circuit on each, then plot the results in a bar chart comparing the architectures on depth, swap count, and t gate count (if applicable)
+    
+    # think of general connectivity patterns to test, such as:
+    # - linear nearest neighbor (1D chain)
+    # - 2D grid with nearest neighbor
+    # - 2D grid with k-nearest neighbor (k=2,3,4...)
+    # (like a modular architecture with local high connectivity and sparse long-range links)
+    # - heavy-hex style (like IBM's current superconducting)
+    # this will be a good way to show how increasing connectivity reduces routing overhead and can reduce T gate count by enabling more efficient decompositions, 
+    # especially for the Toffoli cascade which has many long-range interactions.
+    # i can then run this same program over various other real world circuits
+    
+    
+    pass
+
+def multi_computer_clusters():
+    ## this will call functions in the target pipeline which will build a given connectivity map with a target object such that interconnected clusters of qubits have
+    ## significant extra cost in terms of duration compared to other gates. This will be based on real connectivity values 
+    ## for a given device and will be an example of usage for our tool which can be used to evaluate a given 'connectivity' between devices in a multi-computer distributed quantum 
+    # computing scenario. I can then run the same circuit through the transpiler with and without this cost-weighted target to show how it can be used to steer the transpilation 
+    # towards more efficient mappings that avoid costly inter-cluster interactions.
+
+
+    pass
+
+
+def benchmark_network_degradation(qc: QuantumCircuit):
+    # Let's test 3 different network link error rates: 1%, 5%, and 10%
+    inter_block_errors = [0.01, 0.05, 0.10]
+    results = []
+
+    for error_rate in inter_block_errors:
+        print(f"Building Target with {error_rate*100}% inter-block error...")
+        
+        # Generate a unique target for this iteration
+        target = build_dynamic_ft_target(
+            n_blocks_row=2, 
+            n_blocks_col=2,
+            n=5, m=5, # Using 5x5 blocks for a faster test
+            k_intra=2,
+            intra_cx_error=0.001,  # Keep local error steady at 0.1%
+            inter_cx_error=error_rate, # Variable network error
+        )
+        
+        # NOTE: You MUST use optimization_level=3 for Qiskit to actually 
+        # route around the high-error edges defined in the Target.
+        pm = generate_preset_pass_manager(optimization_level=3, target=target)
+        
+        transpiled_qc = pm.run(qc)
+        
+        results.append({
+            "inter_block_error": error_rate,
+            "depth": transpiled_qc.depth(),
+            "cx_count": transpiled_qc.count_ops().get("cx", 0),
+        })
+        
+    return results
+
+
 
 def main():
-    save_connectivity_map_drawings()
+    # testing benchmark_network_degradation with the toffoli cascade circuit
+    cascade_circuit = get_toffoli_cascade(num_qubits=100) # Using
+    results = benchmark_network_degradation(cascade_circuit)
+    print("\nNetwork Degradation Benchmark Results:")
+    print(pd.DataFrame(results).to_string(index=False))
 
-    qc = build_qiskit_circuit_from_ir()
 
-    results_df = benchmark_all_connectivity_maps(qc)
+    # save_connectivity_map_drawings()
 
-    print("\nBenchmark results:")
-    print(results_df.to_string(index=False))
+    # # qc = build_qiskit_circuit_from_ir()
 
-    plot_and_save(
-        results_df,
-        "Ingested Circuit Connectivity Benchmark",
-        "ingested_circuit_connectivity_benchmark.png",
-        count_t_gates=True,
-    )
+    # # using toffoli cascade
+    # cascade_circuit = get_toffoli_cascade(num_qubits=100)
+    # results_df = benchmark_all_connectivity_maps(cascade_circuit)
+
+    # print("\nBenchmark results:")
+    # print(results_df.to_string(index=False))
+
+    # plot_and_save(
+    #     results_df,
+    #     "Ingested Circuit Connectivity Benchmark",
+    #     "ingested_circuit_connectivity_benchmark.png",
+    #     count_t_gates=True,
+    # )
+
 
 
 if __name__ == "__main__":
     main()
 
 
+# def build_cost_weighted_target(coupling_map):
+#     target = Target()
+    
+#     # Add single-qubit gates (assuming perfect/equal cost for all qubits for this example)
+#     for gate in [RZGate(), SXGate(), XGate(), IGate()]:
+#         target.add_instruction(gate, { (q,): None for q in range(coupling_map.size()) })
 
+#     # Define the two-qubit gate (e.g., CX)
+#     cx_properties = {}
+    
+#     for edge in coupling_map.get_edges():
+#         q1, q2 = edge
+        
+#         # Make the connection between qubit 0 and 1 very costly (e.g., 50% error rate)
+#         if (q1, q2) == (0, 1) or (q1, q2) == (1, 0):
+#             cx_properties[(q1, q2)] = InstructionProperties(error=0.50)
+#         else:
+#             # Standard edges get a normal/low cost (e.g., 1% error rate)
+#             cx_properties[(q1, q2)] = InstructionProperties(error=0.01)
+
+#     target.add_instruction(CXGate(), cx_properties)
+    
+#     return target
 
 
 
