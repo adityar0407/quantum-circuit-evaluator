@@ -23,6 +23,7 @@ from hardware.connectivity import (
     k_nearest_tiled_coupling_map,
 )
 from target_creation.target import build_dynamic_ft_target, build_flexible_target
+from metrics.metrics_evaluator import calculate_circuit_success_chance, get_total_duration, count_network_operations
 
 
 
@@ -197,76 +198,6 @@ def plot_and_save(
     plt.close()
 
 
-## TODO find a better place for this to go
-def calculate_circuit_success_chance(transpiled_qc: QuantumCircuit, target) -> float:
-    """Calculate overall circuit fidelity based on the specific mapped edges."""
-    success_chance = 1.0
-    
-    for instruction in transpiled_qc.data:
-        op_name = instruction.operation.name
-        
-        # Skip operations that don't have physical error rates
-        if op_name in ["barrier", "measure", "delay"]:
-            continue
-            
-        # Get the physical qubit indices this gate was mapped to
-        phys_qubits = tuple(transpiled_qc.find_bit(q).index for q in instruction.qubits)
-        
-        # Retrieve the specific error for this physical gate from our Target
-        # The Target object is a nested mapping: target[instruction_name][qargs]
-        if op_name in target and phys_qubits in target[op_name]:
-            props = target[op_name][phys_qubits]
-            
-            # props is an InstructionProperties object, which has an .error attribute
-            if props and props.error is not None:
-                success_chance *= (1 - props.error)
-            
-    return success_chance
-
-#TODO find a better place for this to go, maybe in a utilities file?
-def get_total_duration(qc: QuantumCircuit) -> float:
-    """Safely retrieves duration from a scheduled circuit."""
-    if hasattr(qc, "duration") and qc.duration is not None:
-        return qc.duration
-    
-    # Fallback for newer Qiskit versions if .duration is missing
-    try:
-        return max(start + inst.operation.duration 
-                   for inst, start, _ in qc.scheduled_instructions)
-    except (ValueError, AttributeError):
-        return 0.0
-    
-# TODO: find a better place for this function
-from qiskit.circuit import Gate
-def count_network_operations(qc: QuantumCircuit, n: int, m: int) -> dict:
-    """
-    Scans a transpiled physical circuit to count total 2-qubit gates 
-    and how many of those cross between different block modules.
-    """
-    n_block = n * m
-    total_2q_gates = 0
-    inter_block_gates = 0
-    
-    for inst in qc.data:
-        # Check if the operation is a Gate (ignores barriers, delays, measures)
-        # and if it acts on exactly 2 qubits
-        if isinstance(inst.operation, Gate) and len(inst.qubits) == 2:
-            total_2q_gates += 1
-            
-            # Get the physical integer indices of the qubits
-            idx1 = qc.find_bit(inst.qubits[0]).index
-            idx2 = qc.find_bit(inst.qubits[1]).index
-            
-            # Check if they belong to different blocks
-            if (idx1 // n_block) != (idx2 // n_block):
-                inter_block_gates += 1
-                
-    return {
-        "total_2q_gates": total_2q_gates,
-        "inter_block_gates": inter_block_gates
-    }
-
-
 def compare_architectures(qc: QuantumCircuit, debug: bool = False):
     num_qubits = qc.num_qubits
     results = []
@@ -316,7 +247,7 @@ def compare_architectures(qc: QuantumCircuit, debug: bool = False):
                 n=n,
                 m=m,
                 k_intra= None, 
-                k_inter=2, #nearest_neighbor inter-block connectivity 
+                k_inter=2, #2nd nearest_neighbor inter-block connectivity 
                 connector_local=2, #connect the 3rd qubit in each block for inter-block connectivity
             )
 
@@ -367,8 +298,9 @@ def compare_architectures(qc: QuantumCircuit, debug: bool = False):
 def main():
     # testing the iterative block code creation
     cascade_circuit = get_toffoli_cascade(num_qubits=100) # Using the Toffoli cascade circuit as a test case for the architecture comparison
-    compare_results = compare_architectures(cascade_circuit, debug=True)
-    print(compare_results.style.format({"overall_success_chance": "{:.2%}"}).to_string())
+
+    compare_results = compare_architectures(cascade_circuit)
+    compare_results.to_csv("architecture_comparison_results_sabre.csv", index=False)
 
     
 

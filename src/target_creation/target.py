@@ -106,7 +106,7 @@ def build_flexible_target(
     m: int = 10,
     k_intra: int = None,
     k_inter: int = 1,
-    connector_local: int = 0,
+    connector_local: int = 1,
     inter_err: float = 0.05,
     inter_dur: float = 1e-6,
     # Overrides (optional)
@@ -116,24 +116,27 @@ def build_flexible_target(
     
     # 1. Define Architecture Profiles
     # Values represent typical orders of magnitude for these systems
+
+    # superconducting fidelity citation: https://arxiv.org/html/2410.00916v1#:~:text=It%20demonstrated%20the%20highest%20QV,minimizing%20spectator%20errors%20%5B43%5D%20.   
+    # used worst-case error rates for generalized benchmarking
     profiles = {
         'Fault Tolerant': {
             'sq_gates': [IGate(), HGate(), SGate(), SdgGate(), TGate(), TdgGate()],
             'two_q_gate': CXGate(),
             'k_intra':2,
-            'sq_err': 1e-4, 'sq_dur': 50e-9,
-            'intra_err': 1e-3, 'intra_dur': 200e-9
+            'sq_err': 1e-5, 'sq_dur': 50e-9,
+            'intra_err': 1e-4, 'intra_dur': 200e-9
         },
         'Superconducting': {
             'sq_gates': [RZGate(0), SXGate(), XGate()], # Standard IBM basis
             'two_q_gate': CXGate(),
             'k_intra':1,
-            'sq_err': 5e-4, 'sq_dur': 30e-9,
-            'intra_err': 1e-2, 'intra_dur': 300e-9
+            'sq_err': 1e-4, 'sq_dur': 50e-9,
+            'intra_err': 1e-3, 'intra_dur': 500e-9
         },
         'Trapped Ion': {
             'sq_gates': [RXGate(0), RYGate(0), RZGate(0)], 
-            'two_q_gate': RXXGate(0), # Mølmer-Sørensen gate
+            'two_q_gate': CXGate(), # Not using Mølmer-Sørensen gate since it's baloonin my transpilation time... can keep gate time and fidelity for 
             'k_intra': None,
             'sq_err': 1e-5, 'sq_dur': 10e-6, # Much slower, but higher fidelity
             'intra_err': 5e-4, 'intra_dur': 100e-6
