@@ -32,7 +32,7 @@ def get_toffoli_cascade(num_qubits: int) -> QuantumCircuit:
 
 
 
-def get_trotterized_spin_chain(num_qubits: int = 900, steps: int = 2) -> QuantumCircuit:
+def get_trotterized_spin_chain(num_qubits: int = 100, steps: int = 2) -> QuantumCircuit:
     """
     Simulates the time evolution of a 1D Heisenberg/Ising material.
     A cornerstone of quantum simulation in chemistry and physics.
