@@ -41,6 +41,8 @@ def build_dynamic_ft_target(
         k_inter=k_inter,
         connector_local=connector_local
     )
+
+    
     
     num_qubits = cmap.size()
     n_block = n * m  # Number of qubits in a single FT computer

@@ -7,9 +7,10 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from qiskit import QuantumCircuit
 from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
+from qiskit.visualization import plot_coupling_map
 
 # Local project imports
-from IR.circuit_loader import input_test_circuit, get_toffoli_cascade
+from IR.circuit_loader import input_test_circuit, get_toffoli_cascade, get_trotterized_spin_chain
 from IR.export_qasm import export_to_qasm
 from IR.qasm_ingestor import ingest_qasm_string
 from IR.qasm_to_ir import qasm_to_ir
@@ -194,62 +195,113 @@ def plot_and_save(
     plt.savefig(filename, dpi=300, bbox_inches="tight")
     plt.close()
 
-def iterate_circuit_connectivities(circuit: QuantumCircuit):
-    # go through a series of various connectivities and benchmark the same circuit on each, then plot the results in a bar chart comparing the architectures on depth, swap count, and t gate count (if applicable)
+
+## TODO find a better place for this to go
+def calculate_circuit_success_chance(transpiled_qc: QuantumCircuit, target) -> float:
+    """Calculate overall circuit fidelity based on the specific mapped edges."""
+    success_chance = 1.0
     
-    # think of general connectivity patterns to test, such as:
-    # - linear nearest neighbor (1D chain)
-    # - 2D grid with nearest neighbor
-    # - 2D grid with k-nearest neighbor (k=2,3,4...)
-    # (like a modular architecture with local high connectivity and sparse long-range links)
-    # - heavy-hex style (like IBM's current superconducting)
-    # this will be a good way to show how increasing connectivity reduces routing overhead and can reduce T gate count by enabling more efficient decompositions, 
-    # especially for the Toffoli cascade which has many long-range interactions.
-    # i can then run this same program over various other real world circuits
-    
-    
-    pass
-
-def multi_computer_clusters():
-    ## this will call functions in the target pipeline which will build a given connectivity map with a target object such that interconnected clusters of qubits have
-    ## significant extra cost in terms of duration compared to other gates. This will be based on real connectivity values 
-    ## for a given device and will be an example of usage for our tool which can be used to evaluate a given 'connectivity' between devices in a multi-computer distributed quantum 
-    # computing scenario. I can then run the same circuit through the transpiler with and without this cost-weighted target to show how it can be used to steer the transpilation 
-    # towards more efficient mappings that avoid costly inter-cluster interactions.
-
-
-    pass
-
+    for instruction in transpiled_qc.data:
+        op_name = instruction.operation.name
+        
+        # Skip operations that don't have physical error rates
+        if op_name in ["barrier", "measure", "delay"]:
+            continue
+            
+        # Get the physical qubit indices this gate was mapped to
+        phys_qubits = tuple(transpiled_qc.find_bit(q).index for q in instruction.qubits)
+        
+        # Retrieve the specific error for this physical gate from our Target
+        # The Target object is a nested mapping: target[instruction_name][qargs]
+        if op_name in target and phys_qubits in target[op_name]:
+            props = target[op_name][phys_qubits]
+            
+            # props is an InstructionProperties object, which has an .error attribute
+            if props and props.error is not None:
+                success_chance *= (1 - props.error)
+            
+    return success_chance
 
 def benchmark_network_degradation(qc: QuantumCircuit):
-    # Let's test 3 different network link error rates: 1%, 5%, and 10%
-    inter_block_errors = [0.01, 0.05, 0.10]
     results = []
 
-    for error_rate in inter_block_errors:
-        print(f"Building Target with {error_rate*100}% inter-block error...")
-        
-        # Generate a unique target for this iteration
-        target = build_dynamic_ft_target(
-            n_blocks_row=2, 
-            n_blocks_col=2,
-            n=5, m=5, # Using 5x5 blocks for a faster test
-            k_intra=2,
-            intra_cx_error=0.001,  # Keep local error steady at 0.1%
-            inter_cx_error=error_rate, # Variable network error
-        )
-        
-        # NOTE: You MUST use optimization_level=3 for Qiskit to actually 
-        # route around the high-error edges defined in the Target.
-        pm = generate_preset_pass_manager(optimization_level=3, target=target)
-        
-        transpiled_qc = pm.run(qc)
-        
-        results.append({
-            "inter_block_error": error_rate,
-            "depth": transpiled_qc.depth(),
-            "cx_count": transpiled_qc.count_ops().get("cx", 0),
-        })
+    # 1. Test different cluster layouts (all totaling exactly 900 qubits)
+    # Format: (n_blocks_row, n_blocks_col, n, m)
+    architectures = [
+        (1, 1, 30, 30), # 1 massive computer (900 qubits)
+        (3, 3, 10, 10), # 9 connected computers (100 qubits each)
+        (5, 5, 6, 6),   # 25 connected computers (36 qubits each)
+    ]
+    
+    # 2. Test Inter-connectiveness (Nearest neighbor vs Next-nearest block connections)
+    k_inter_values = [1, 2] 
+    
+    # 3. Test Inter-connectiveness probabilities (Local error rates inside the blocks)
+    inter_cx_errors = [0.05] 
+
+
+
+    for (br, bc, n, m) in architectures:
+        for k_inter in k_inter_values:
+            # Skip k_inter>1 if we only have 1 monolithic block (no network exists)
+            if br * bc == 1 and k_inter > 1:
+                continue 
+            config_name = f"{br*bc}cores_{n}x{m}qubits_kinter{k_inter}"
+            for inter_err in inter_cx_errors:
+                
+                
+                print(f"\n--- Evaluating: {config_name}inter{inter_err} ---")
+                
+                current_time = time.time()
+                
+                # Build the dynamic Target
+                target = build_dynamic_ft_target(
+                    n_blocks_row=br, 
+                    n_blocks_col=bc,
+                    n=n, m=m, 
+                    k_intra=1,
+                    k_inter=br + bc,
+                    intra_cx_error=0.001,
+                    inter_cx_error=inter_err
+                )
+                
+                # Draw and save the connectivity map for this specific architecture
+                image = target.build_coupling_map().draw()
+                image_filename = f"map_{config_name}.png"
+                if hasattr(image, "savefig"):
+                    image.savefig(image_filename, dpi=300, bbox_inches="tight")
+                else:
+                    image.save(image_filename)
+                
+                print("Target and map built. Running level 3 transpiler with ALAP scheduling...")
+                
+                # Use "alap" scheduling so Qiskit calculates the .duration attribute
+                pm = generate_preset_pass_manager(
+                    optimization_level=3, 
+                    target=target,
+                    scheduling_method="alap"
+                )
+                
+                transpiled_qc = pm.run(qc)
+                
+                transpile_time = time.time() - current_time
+                print(f"Transpilation complete in {transpile_time:.2f} seconds.")
+                
+                # Extract the newly requested metrics
+                overall_success = calculate_circuit_success_chance(transpiled_qc, target)
+                total_duration_seconds = transpiled_qc.duration
+                
+                results.append({
+                    "architecture": f"{br*bc} computers",
+                    "qubits_per_computer": n * m,
+                    "k_inter": k_inter,
+                    "intra_error_rate": inter_err,
+                    "overall_success_chance": overall_success,
+                    "duration_seconds": total_duration_seconds,
+                    "transpiled_depth": transpiled_qc.depth(),
+                    "cx_count": transpiled_qc.count_ops().get("cx", 0),
+                    "transpile_time_sec": round(transpile_time, 2)
+                })
         
     return results
 
@@ -257,7 +309,7 @@ def benchmark_network_degradation(qc: QuantumCircuit):
 
 def main():
     # testing benchmark_network_degradation with the toffoli cascade circuit
-    cascade_circuit = get_toffoli_cascade(num_qubits=100) # Using
+    cascade_circuit = get_toffoli_cascade(num_qubits=900) # Using
     results = benchmark_network_degradation(cascade_circuit)
     print("\nNetwork Degradation Benchmark Results:")
     print(pd.DataFrame(results).to_string(index=False))

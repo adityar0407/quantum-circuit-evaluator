@@ -32,3 +32,32 @@ def get_toffoli_cascade(num_qubits: int) -> QuantumCircuit:
 
 
 
+def get_trotterized_spin_chain(num_qubits: int = 900, steps: int = 2) -> QuantumCircuit:
+    """
+    Simulates the time evolution of a 1D Heisenberg/Ising material.
+    A cornerstone of quantum simulation in chemistry and physics.
+    """
+    qc = QuantumCircuit(num_qubits)
+    
+    # Interaction angle (represents time step * coupling strength)
+    theta = 0.1 
+    
+    for _ in range(steps):
+        # Even-Odd Layering (Parallel CX interactions)
+        # Even bonds
+        for i in range(0, num_qubits - 1, 2):
+            qc.cx(i, i+1)
+            qc.rz(theta, i+1)
+            qc.cx(i, i+1)
+            
+        qc.barrier() # Prevent the transpiler from artificially merging layers
+            
+        # Odd bonds
+        for i in range(1, num_qubits - 1, 2):
+            qc.cx(i, i+1)
+            qc.rz(theta, i+1)
+            qc.cx(i, i+1)
+            
+        qc.barrier()
+        
+    return qc
