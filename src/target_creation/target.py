@@ -117,8 +117,11 @@ def build_flexible_target(
     # 1. Define Architecture Profiles
     # Values represent typical orders of magnitude for these systems
 
-    # superconducting fidelity citation: https://arxiv.org/html/2410.00916v1#:~:text=It%20demonstrated%20the%20highest%20QV,minimizing%20spectator%20errors%20%5B43%5D%20.   
+    # superconducting general fidelity citation: https://arxiv.org/html/2410.00916v1#:~:text=It%20demonstrated%20the%20highest%20QV,minimizing%20spectator%20errors%20%5B43%5D%20.   
     # used worst-case error rates for generalized benchmarking
+
+    # google Suppressing quantum errors by scaling a surface code logical qubit. Nature, 614(7949), 676-681.
+    # gives benchmark for Fault Tolerant Superconducting
     profiles = {
         'Fault Tolerant': {
             'sq_gates': [IGate(), HGate(), SGate(), SdgGate(), TGate(), TdgGate()],
@@ -134,6 +137,17 @@ def build_flexible_target(
             'sq_err': 1e-4, 'sq_dur': 50e-9,
             'intra_err': 1e-3, 'intra_dur': 500e-9
         },
+        'Fault Tolerant Superconducting google': {
+            'sq_gates': [SXGate(), RZGate(0)], 
+            'two_q_gate': CZGate(),
+            # Using Google's incredibly fast gate times
+            'sq_dur': 25e-9,  
+            'intra_dur': 34e-9,
+            'k_intra': 1,
+            # Using the theoretical target fidelities required to run surface codes efficiently
+            'sq_err': 1e-4,     # 99.99% fidelity
+            'intra_err': 1e-3   # 99.90% fidelity
+        }, 
         'Trapped Ion': {
             'sq_gates': [RXGate(0), RYGate(0), RZGate(0)], 
             'two_q_gate': CXGate(), # Not using Mølmer-Sørensen gate since it's baloonin my transpilation time... can keep gate time and fidelity for 

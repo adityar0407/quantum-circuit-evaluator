@@ -280,6 +280,7 @@ def compare_architectures(qc: QuantumCircuit, debug: bool = False):
                 "overall_success_chance": overall_success,
                 "shots_for_success": shots_for_success,
                 "duration_seconds": total_duration_seconds,
+                "time_for_success_sec": total_duration_seconds * shots_for_success if overall_success > 0 else float('inf'),
                 "transpiled_depth": transpiled_qc.depth(),
                 "total_two_qubit_gates": two_q_gate_counts["total_2q_gates"],
                 "inter_block_gates": two_q_gate_counts["inter_block_gates"],
