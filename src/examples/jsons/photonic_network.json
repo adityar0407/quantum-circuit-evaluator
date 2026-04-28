@@ -1,0 +1,23 @@
+{
+  "topology": {
+    "type": "tiled_k_nearest",
+    "n_blocks_row": 3,
+    "n_blocks_col": 3,
+    "n": 4,
+    "m": 4,
+    "k_intra": 1,
+    "k_inter": 1,
+    "connector_local": 1
+  },
+  "profile": {
+    "sq_gates": ["RZGate", "HGate"],
+    "two_q_gates": ["CZGate"],
+    "sq_err": 1e-5,
+    "sq_dur": 1e-12,
+    "intra_err": 1e-1,
+    "intra_dur": 1e-11,
+    "inter_err": 2e-1,
+    "inter_dur": 5e-11
+  }
+  
+}

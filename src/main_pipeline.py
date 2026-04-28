@@ -25,9 +25,7 @@ from hardware.connectivity import (
     load_ibm_torino_coupling_map,
     k_nearest_tiled_coupling_map,
 )
-from target_creation.target import (
-    build_flexible_target,
-    get_architecture_display_name,
+from target_creation.target import ( FTarget
 )
 from metrics.metrics_evaluator import calculate_circuit_success_chance, get_total_duration, count_network_operations
 

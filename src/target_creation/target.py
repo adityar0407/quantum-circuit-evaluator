@@ -93,13 +93,13 @@ class FTarget(Target):
         # 4. Validate and parse the profile from the configuration
         self._validate_and_parse_profile()
 
-        
-        
         # 5. Initialize parent Qiskit Target
         super().__init__()
         
         # 6. Populate Target with the dynamically loaded gates
         self._populate_instructions()
+
+
 
     def _validate_and_parse_profile(self):
         """Validates the input profile and converts string names to Qiskit gates."""
@@ -137,8 +137,8 @@ class FTarget(Target):
             self.intra_dur = float(profile['intra_dur'])
             
            
-            self.inter_err = float(self.config.get("inter_err", 0.05))
-            self.inter_dur = float(self.config.get("inter_dur", 1e-6))
+            self.inter_err = float(profile.get("inter_err", 0.05))
+            self.inter_dur = float(profile.get("inter_dur", 1e-6))
             
         except (ValueError, TypeError):
             raise TypeError("All error rates and durations must be numeric values (int or float).")

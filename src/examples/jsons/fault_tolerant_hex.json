@@ -1,0 +1,19 @@
+{
+  "topology": {
+    "type": "heavy_hex",
+    "n_blocks_row": 3,
+    "n_blocks_col": 3,
+    "d": 5,
+    "k_inter": 2
+  },
+  "profile": {
+    "sq_gates": ["IGate", "HGate", "SGate", "SdgGate", "TGate", "TdgGate"],
+    "two_q_gates": ["CXGate"],
+    "sq_err": 1e-5,
+    "sq_dur": 50e-9,
+    "intra_err": 1e-4,
+    "intra_dur": 200e-9,
+    "inter_err": 1e-3,
+    "inter_dur": 1000e-9
+  }
+}
