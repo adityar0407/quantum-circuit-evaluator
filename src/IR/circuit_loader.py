@@ -1,9 +1,4 @@
-# Load a circuit of your choice defined by Pennylane 
-<<<<<<< HEAD
-import pennylane as qml
 from qiskit import QuantumCircuit
-=======
->>>>>>> 92c76a64f880ad89733cc25655afacdab7ca33c7
 
 # Simple test circut 
 def input_test_circuit (): 

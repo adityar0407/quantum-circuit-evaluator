@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from qiskit.transpiler import Target, InstructionProperties
+from qiskit.transpiler import Target, InstructionProperties, CouplingMap
 from qiskit.circuit.library import (
     HGate, SGate, SdgGate, TGate, TdgGate, CXGate, IGate, 
     RZGate, SXGate, XGate, RXGate, RYGate, CZGate, RXXGate
@@ -30,6 +30,38 @@ def get_architecture_display_name(modality: str, regime: str) -> str:
     modality_name = MODALITY_DISPLAY_NAMES.get(modality, modality.replace("_", " ").title())
     regime_name = REGIME_DISPLAY_NAMES.get(regime, regime.upper())
     return f"{regime_name} {modality_name}"
+
+
+def build_ibm_superconducting_target(
+    coupling_map: CouplingMap,
+    sq_error: float = 1e-4,
+    sq_duration: float = 50e-9,
+    cx_error: float = 1e-3,
+    cx_duration: float = 500e-9,
+) -> Target:
+    """
+    Build a concrete IBM-style superconducting NISQ target from a backend
+    coupling map using the repo's modeled superconducting timing/error values.
+    """
+    num_qubits = coupling_map.size()
+    target = Target(num_qubits=num_qubits)
+
+    sq_props = {
+        (q,): InstructionProperties(error=sq_error, duration=sq_duration)
+        for q in range(num_qubits)
+    }
+    target.add_instruction(IGate(), sq_props)
+    target.add_instruction(RZGate(0), sq_props)
+    target.add_instruction(SXGate(), sq_props)
+    target.add_instruction(XGate(), sq_props)
+
+    cx_props = {
+        (q1, q2): InstructionProperties(error=cx_error, duration=cx_duration)
+        for q1, q2 in coupling_map.get_edges()
+    }
+    target.add_instruction(CXGate(), cx_props)
+
+    return target
 
 
 def _normalize_architecture_request(
