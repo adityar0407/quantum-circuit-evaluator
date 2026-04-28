@@ -15,4 +15,8 @@ def get_init_pm(basis_gates: list[str] | None = None) -> PassManager:
     if basis_gates is not None:
         passes.append(UnrollCustomDefinitions(sel, basis_gates))
 
+<<<<<<< HEAD
     return PassManager(passes)
+=======
+    return PassManager(passes)
+>>>>>>> 92c76a64f880ad89733cc25655afacdab7ca33c7
