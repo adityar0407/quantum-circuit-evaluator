@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from qiskit.transpiler import Target, InstructionProperties
 from qiskit.circuit.library import (
     HGate, SGate, SdgGate, TGate, TdgGate, CXGate, IGate, 
@@ -16,7 +18,7 @@ def build_dynamic_ft_target(
     m: int = 10,
     k_intra: int = 2,
     k_inter: int = 1,
-    connector_local: int = 0,
+    connector_local: int = 1,
     
     # Single-qubit gate properties
     sq_error: float = 1e-4,
@@ -97,9 +99,173 @@ def build_dynamic_ft_target(
 
 
 
+# Display labels used in tables/plots.
+MODALITY_DISPLAY_NAMES = {
+    "superconducting": "Superconducting",
+    "trapped_ion": "Trapped Ion",
+    "neutral_atom": "Neutral Atom",
+    "photonic": "Photonic",
+}
+
+REGIME_DISPLAY_NAMES = {
+    "nisq": "NISQ",
+    "ft": "FT",
+}
+
+
+def get_architecture_display_name(modality: str, regime: str) -> str:
+    """Return a human-readable architecture label."""
+    modality_name = MODALITY_DISPLAY_NAMES.get(modality, modality.replace("_", " ").title())
+    regime_name = REGIME_DISPLAY_NAMES.get(regime, regime.upper())
+    return f"{regime_name} {modality_name}"
+
+
+def _normalize_architecture_request(
+    modality: str | None = None,
+    regime: str | None = None,
+    arch_type: str | None = None,
+) -> tuple[str, str]:
+    """
+    Normalize legacy flat architecture labels into explicit modality/regime axes.
+
+    Legacy flat labels map as follows:
+    - Superconducting / Trapped Ion / Neutral Atom / Photonic -> NISQ
+    - Fault Tolerant -> FT superconducting-style logical default
+    """
+
+    legacy_map = {
+        "superconducting": ("superconducting", "nisq"),
+        "trapped ion": ("trapped_ion", "nisq"),
+        "trapped_ion": ("trapped_ion", "nisq"),
+        "neutral atom": ("neutral_atom", "nisq"),
+        "neutral_atom": ("neutral_atom", "nisq"),
+        "photonic": ("photonic", "nisq"),
+        "fault tolerant": ("superconducting", "ft"),
+        "fault_tolerant": ("superconducting", "ft"),
+        "ft": ("superconducting", "ft"),
+    }
+
+    if modality is None and regime is None and arch_type is not None:
+        key = arch_type.strip().lower()
+        if key in legacy_map:
+            return legacy_map[key]
+        raise ValueError(f"Unknown legacy architecture label: {arch_type}")
+
+    if modality is None or regime is None:
+        raise ValueError("Both modality and regime must be provided.")
+
+    return modality.strip().lower(), regime.strip().lower()
+
+    # 1. Define Architecture Profiles
+    # Values represent typical orders of magnitude for these systems
+
+    # superconducting fidelity citation: https://arxiv.org/html/2410.00916v1#:~:text=It%20demonstrated%20the%20highest%20QV,minimizing%20spectator%20errors%20%5B43%5D%20.   
+    # used worst-case error rates for generalized benchmarking
+
+def _get_architecture_profiles() -> dict[str, dict[str, dict]]:
+    """
+    Architecture model definitions.
+
+    Regime determines the compiler abstraction level:
+    - NISQ: physical/native-ish gate set and physical-style assumptions
+    - FT: logical ISA and logical/distributed assumptions with modality-inspired
+    duration/error scales
+    """
+    # The FT side compiles to a logical ISA rather than physical-native gates.
+    logical_sq_gates = [IGate(), HGate(), SGate(), SdgGate(), TGate(), TdgGate()]
+
+    return {
+        "superconducting": {
+            "nisq": {
+                # Standard IBM-style physical/native basis.
+                "sq_gates": [RZGate(0), SXGate(), XGate()],
+                "two_q_gate": CXGate(),
+                "k_intra": 1,
+                "sq_err": 1e-4,
+                "sq_dur": 50e-9,
+                "intra_err": 1e-3,
+                "intra_dur": 500e-9,
+            },
+            "ft": {
+                # FT superconducting means logical gates implemented atop a
+                # superconducting physical stack, so the logical ISA takes over.
+                "sq_gates": logical_sq_gates,
+                "two_q_gate": CXGate(),
+                "k_intra": 2,
+                "sq_err": 1e-5,
+                "sq_dur": 50e-9,
+                "intra_err": 1e-4,
+                "intra_dur": 200e-9,
+            },
+        },
+        "trapped_ion": {
+            "nisq": {
+                "sq_gates": [RXGate(0), RYGate(0), RZGate(0)],
+                "two_q_gate": CXGate(),
+                "k_intra": None,
+                "sq_err": 1e-5,
+                "sq_dur": 10e-6,
+                "intra_err": 5e-4,
+                "intra_dur": 100e-6,
+            },
+            "ft": {
+                "sq_gates": logical_sq_gates,
+                "two_q_gate": CXGate(),
+                "k_intra": 2,
+                "sq_err": 1e-6,
+                "sq_dur": 10e-6,
+                "intra_err": 5e-5,
+                "intra_dur": 100e-6,
+            },
+        },
+        "neutral_atom": {
+            "nisq": {
+                "sq_gates": [RXGate(0), RYGate(0), RZGate(0)],
+                "two_q_gate": CZGate(),
+                "k_intra": None,
+                "sq_err": 1e-4,
+                "sq_dur": 1e-6,
+                "intra_err": 1e-2,
+                "intra_dur": 2e-6,
+            },
+            "ft": {
+                "sq_gates": logical_sq_gates,
+                "two_q_gate": CXGate(),
+                "k_intra": 2,
+                "sq_err": 5e-6,
+                "sq_dur": 1e-6,
+                "intra_err": 5e-4,
+                "intra_dur": 5e-6,
+            },
+        },
+        "photonic": {
+            "nisq": {
+                "sq_gates": [RZGate(0), HGate()],
+                "two_q_gate": CZGate(),
+                "k_intra": 1,
+                "sq_err": 1e-5,
+                "sq_dur": 1e-12,
+                "intra_err": 1e-1,
+                "intra_dur": 1e-11,
+            },
+            "ft": {
+                "sq_gates": logical_sq_gates,
+                "two_q_gate": CXGate(),
+                "k_intra": 2,
+                "sq_err": 1e-6,
+                "sq_dur": 1e-12,
+                "intra_err": 1e-2,
+                "intra_dur": 1e-10,
+            },
+        },
+    }
+
+
 ## used to build different models of the target for testing different parameters in the main pipeline
 def build_flexible_target(
-    arch_type: str = 'Fault Tolerant', # 'Superconducting', 'Trapped Ion', 'Neutral Atom', 'Photonic', 'Fault Tolerant'
+    modality: str | None = None,
+    regime: str | None = None,
+    arch_type: str | None = None,
     n_blocks_row: int = 2,
     n_blocks_col: int = 2,
     n: int = 10,
@@ -109,58 +275,29 @@ def build_flexible_target(
     connector_local: int = 1,
     inter_err: float = 0.05,
     inter_dur: float = 1e-6,
-    # Overrides (optional)
+    # Overrides 
     custom_sq_error: float = None,
     custom_2q_error: float = None
 ) -> Target:
-    
-    # 1. Define Architecture Profiles
-    # Values represent typical orders of magnitude for these systems
 
-    # superconducting fidelity citation: https://arxiv.org/html/2410.00916v1#:~:text=It%20demonstrated%20the%20highest%20QV,minimizing%20spectator%20errors%20%5B43%5D%20.   
-    # used worst-case error rates for generalized benchmarking
-    profiles = {
-        'Fault Tolerant': {
-            'sq_gates': [IGate(), HGate(), SGate(), SdgGate(), TGate(), TdgGate()],
-            'two_q_gate': CXGate(),
-            'k_intra':2,
-            'sq_err': 1e-5, 'sq_dur': 50e-9,
-            'intra_err': 1e-4, 'intra_dur': 200e-9
-        },
-        'Superconducting': {
-            'sq_gates': [RZGate(0), SXGate(), XGate()], # Standard IBM basis
-            'two_q_gate': CXGate(),
-            'k_intra':1,
-            'sq_err': 1e-4, 'sq_dur': 50e-9,
-            'intra_err': 1e-3, 'intra_dur': 500e-9
-        },
-        'Trapped Ion': {
-            'sq_gates': [RXGate(0), RYGate(0), RZGate(0)], 
-            'two_q_gate': CXGate(), # Not using Mølmer-Sørensen gate since it's baloonin my transpilation time... can keep gate time and fidelity for 
-            'k_intra': None,
-            'sq_err': 1e-5, 'sq_dur': 10e-6, # Much slower, but higher fidelity
-            'intra_err': 5e-4, 'intra_dur': 100e-6
-        },
-        'Neutral Atom': {
-            'sq_gates': [RXGate(0), RYGate(0), RZGate(0)],
-            'two_q_gate': CZGate(),
-            'k_intra': None,
-            'sq_err': 1e-4, 'sq_dur': 1e-6,
-            'intra_err': 1e-2, 'intra_dur': 2e-6
-        },
-        'Photonic': {
-            'sq_gates': [RZGate(0), HGate()],
-            'two_q_gate': CZGate(),
-            'k_intra': 1,
-            'sq_err': 1e-5, 'sq_dur': 1e-12, # Extremely fast, but high loss (simulated as error)
-            'intra_err': 1e-1, 'intra_dur': 1e-11
-        }
-    }
-   
-    prof = profiles.get(arch_type, profiles['Fault Tolerant'])
+    modality, regime = _normalize_architecture_request(
+        modality=modality,
+        regime=regime,
+        arch_type=arch_type,
+    )
+    profiles = _get_architecture_profiles()
+
+    if modality not in profiles:
+        supported = ", ".join(sorted(profiles))
+        raise ValueError(f"Unknown modality: {modality}. Supported modalities: {supported}")
+    if regime not in profiles[modality]:
+        supported = ", ".join(sorted(profiles[modality]))
+        raise ValueError(f"Unknown regime: {regime}. Supported regimes for {modality}: {supported}")
+
+    prof = profiles[modality][regime]
 
     
-    # Apply overrides if provided
+    # Apply overrides if provided.
     sq_err = custom_sq_error or prof['sq_err']
     intra_err = custom_2q_error or prof['intra_err']
     if k_intra is None:

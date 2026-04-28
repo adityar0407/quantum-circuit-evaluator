@@ -2,6 +2,7 @@
 import pennylane as qml
 from qiskit import QuantumCircuit
 
+# Simple test circut 
 def input_test_circuit (): 
     dev = qml.device("default.qubit", wires = 2)
     @qml.qnode(dev)
@@ -11,7 +12,7 @@ def input_test_circuit ():
         return qml.state()
     return circuit
 
-
+# Other input circuits 
 def get_toffoli_cascade(num_qubits: int) -> QuantumCircuit:
     """
     Generates a ladder of Toffoli gates across the entire qubit register.
@@ -29,7 +30,6 @@ def get_toffoli_cascade(num_qubits: int) -> QuantumCircuit:
         qc.ccx(i, i+1, i+2)
         
     return qc
-
 
 
 def get_trotterized_spin_chain(num_qubits: int = 100, steps: int = 2) -> QuantumCircuit:

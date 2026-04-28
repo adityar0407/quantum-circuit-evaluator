@@ -200,6 +200,8 @@ def build_ft_style_coupling_map(
     It is a structural connectivity model only, not a full surface-code,
     decoder, or noise simulation.
     """
+    # connector_local is now interpreted as an edge-connector spacing / step
+    # size, so the smallest valid value is 1 rather than 0.
     return k_nearest_tiled_coupling_map(
         n_blocks_row=2,
         n_blocks_col=2,
@@ -207,7 +209,7 @@ def build_ft_style_coupling_map(
         m=10,
         k_intra=k_intra,
         k_inter=k_inter,
-        connector_local=0,
+        connector_local=1,
     )
 
 
