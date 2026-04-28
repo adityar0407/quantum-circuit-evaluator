@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 import pennylane as qml
 
 def export_to_qasm(circuit):
@@ -9,7 +8,6 @@ def export_to_qasm(circuit):
     qasm_string = circuit.tape.to_openqasm()
     
     return qasm_string
-=======
 # Export circuit generated from pennylane to a standard OpenQASM string for easier readability and compatibility with compiler further down the pipeline 
 
 def export_to_qasm(circuit): 
@@ -17,4 +15,3 @@ def export_to_qasm(circuit):
 
     qasm_string = qml.to_openqasm(circuit)()
     return qasm_string
->>>>>>> 92c76a64f880ad89733cc25655afacdab7ca33c7
