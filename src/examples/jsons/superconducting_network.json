@@ -12,7 +12,7 @@
   "profile": {
     "sq_gates": ["RZGate", "SXGate", "XGate"],
     "two_q_gates": ["CXGate"],
-    "sq_err": 1e-4,
+    "sq_err": 1e-4, 
     "sq_dur": 50e-9,
     "intra_err": 1e-3,
     "intra_dur": 500e-9,

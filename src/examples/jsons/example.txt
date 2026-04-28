@@ -1,0 +1,22 @@
+{
+  "topology": {
+    "type": "tiled_k_nearest", # how to make the overall computer connectivity
+    "n_blocks_row": 3, 
+    "n_blocks_col": 3,
+    "n": 4, # n qubits by 
+    "m": 4, # m qubits per block
+    "k_intra": 1, # connectivity of inside block by K_nearest distance
+    "k_inter": 1, # connectivity of Blocks themselves
+    "connector_local": 1 # ratio of qubits to connect to each other (1 means every edge qubit connects to a neighbor, 2 means every other, 3, etc...)
+  },
+  "profile": {
+    "sq_gates": ["RZGate", "SXGate", "XGate"],
+    "two_q_gates": ["CXGate"],
+    "sq_err": 1e-4, # single qubit error (FIDELITY)
+    "sq_dur": 50e-9, # single qubit durration in SECONDS
+    "intra_err": 1e-3, # 2 qubit error (FIDELITY)
+    "intra_dur": 500e-9, # 2 qubit durration in SECONDS
+    "inter_err": 5e-2, # LINK BETWEEN DEVICES error
+    "inter_dur": 1500e-9 # LINK BETWEEN DEVICES durration
+  }
+}
