@@ -71,8 +71,15 @@ def k_nearest_tiled_coupling_map(
     k_intra: int,
     k_inter: int = 1,
     connector_local: int = 1,
-) -> CouplingMap:
-    """Build a CouplingMap for a tiled block layout."""
+) -> tuple[CouplingMap, int]:
+    """Build a CouplingMap for a tiled block layout.
+    each block has n rows and m columns of qubits, with k_intra nearest neighbor connectivity within the block.
+    Blocks are arranged in a grid with n_blocks_row rows and n_blocks_col columns.
+    Inter-block connectivity is determined by k_inter (which blocks are connected)
+    and connector_local (how many qubits on the edge are connected between blocks).
+    """
+
+
     if n_blocks_row <= 0 or n_blocks_col <= 0:
         raise ValueError("Number of block rows/cols must be positive.")
     if n <= 0 or m <= 0:
@@ -82,6 +89,8 @@ def k_nearest_tiled_coupling_map(
     if k_inter < 1:
         raise ValueError("k_inter must be at least 1.")
 
+
+    # total qubits per block and overall
     n_block = n * m
     n_total = n_blocks_row * n_blocks_col * n_block
 
@@ -133,7 +142,7 @@ def k_nearest_tiled_coupling_map(
                     if 1 <= block_dist <= k_inter:
                         offset_b = block_offset(br2, bc2)
                         
-                        # Calculate relative direction
+                        # Calculate relative direction (up, down, left, right) to determine which edges to connect
                         dr = br2 - br
                         dc = bc2 - bc
                         
@@ -180,12 +189,13 @@ def k_nearest_tiled_coupling_map(
     cmap = CouplingMap(couplinglist=coupling_list)
 
     # Quick check that the total qubit count matches what we expect.
-    if cmap.size() != n_total:
+    _size = cmap.size()
+    if _size != n_total:
         raise RuntimeError(
-            f"CouplingMap size mismatch: expected {n_total}, got {cmap.size()}."
+            f"CouplingMap size mismatch: expected {n_total}, got {_size}."
         )
 
-    return cmap
+    return (cmap, _size)
 
 
 def build_ft_style_coupling_map(

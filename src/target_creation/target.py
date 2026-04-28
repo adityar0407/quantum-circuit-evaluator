@@ -1,140 +1,205 @@
-from qiskit.transpiler import Target, InstructionProperties
-from qiskit.circuit.library import (
-    HGate, SGate, SdgGate, TGate, TdgGate, CXGate, IGate, 
-    RZGate, SXGate, XGate, RXGate, RYGate, CZGate, RXXGate
-)
 from hardware.connectivity import k_nearest_tiled_coupling_map
+import json
+import matplotlib.pyplot as plt
+from qiskit.transpiler import Target, InstructionProperties
+import qiskit.circuit.library as qlib
+import networkx as nx
 
-# Import your existing function (if running in a separate file)
+# Ensure your k_nearest_tiled_coupling_map is imported
 # from hardware.connectivity import k_nearest_tiled_coupling_map
 
-## change this to accept JSON file
+class DynamicTarget(Target):
+    """
+    A Qiskit Target fully defined by a configuration dictionary or JSON.
+    It validates the gate set architecture upon creation.
+    """
+    def __init__(self, config: dict = None, **kwargs):
+        # 1. Merge the provided config with any explicit kwargs
+        self.config = config or {}
+        self.config.update(kwargs)
+        
 
-## used to build different models of the target for testing different parameters in the main pipeline
-def build_flexible_target(
-    arch_type: str = 'Fault Tolerant', # 'Superconducting', 'Trapped Ion', 'Neutral Atom', 'Photonic', 'Fault Tolerant'
-    n_blocks_row: int = 2,
-    n_blocks_col: int = 2,
-    n: int = 10,
-    m: int = 10,
-    k_intra: int = None,
-    k_inter: int = 1,
-    connector_local: int = 1,
-    inter_err: float = 0.05,
-    inter_dur: float = 1e-6,
-    # Overrides (optional)
-    custom_sq_error: float = None,
-    custom_2q_error: float = None
-) -> Target:
-    
-    # 1. Define Architecture Profiles
-    # Values represent typical orders of magnitude for these systems
 
-    # superconducting general fidelity citation: https://arxiv.org/html/2410.00916v1#:~:text=It%20demonstrated%20the%20highest%20QV,minimizing%20spectator%20errors%20%5B43%5D%20.   
-    # used worst-case error rates for generalized benchmarking
 
-    # google Suppressing quantum errors by scaling a surface code logical qubit. Nature, 614(7949), 676-681.
-    # gives benchmark for Fault Tolerant Superconducting
-    profiles = {
-        'Fault Tolerant': {
-            'sq_gates': [IGate(), HGate(), SGate(), SdgGate(), TGate(), TdgGate()],
-            'two_q_gate': CXGate(),
-            'k_intra':2,
-            'sq_err': 1e-5, 'sq_dur': 50e-9,
-            'intra_err': 1e-4, 'intra_dur': 200e-9
-        },
-        'Superconducting': {
-            'sq_gates': [RZGate(0), SXGate(), XGate()], # Standard IBM basis
-            'two_q_gate': CXGate(),
-            'k_intra':1,
-            'sq_err': 1e-4, 'sq_dur': 50e-9,
-            'intra_err': 1e-3, 'intra_dur': 500e-9
-        },
-        'Fault Tolerant Superconducting google': {
-            'sq_gates': [SXGate(), RZGate(0)], 
-            'two_q_gate': CZGate(),
-            # Using Google's incredibly fast gate times
-            'sq_dur': 25e-9,  
-            'intra_dur': 34e-9,
-            'k_intra': 1,
-            # Using the theoretical target fidelities required to run surface codes efficiently
-            'sq_err': 1e-4,     # 99.99% fidelity
-            'intra_err': 1e-3   # 99.90% fidelity
-        }, 
-        'Trapped Ion': {
-            'sq_gates': [RXGate(0), RYGate(0), RZGate(0)], 
-            'two_q_gate': CXGate(), # Not using Mølmer-Sørensen gate since it's baloonin my transpilation time... can keep gate time and fidelity for 
-            'k_intra': None,
-            'sq_err': 1e-5, 'sq_dur': 10e-6, # Much slower, but higher fidelity
-            'intra_err': 5e-4, 'intra_dur': 100e-6
-        },
-        'Neutral Atom': {
-            'sq_gates': [RXGate(0), RYGate(0), RZGate(0)],
-            'two_q_gate': CZGate(),
-            'k_intra': None,
-            'sq_err': 1e-4, 'sq_dur': 1e-6,
-            'intra_err': 1e-2, 'intra_dur': 2e-6
-        },
-        'Photonic': {
-            'sq_gates': [RZGate(0), HGate()],
-            'two_q_gate': CZGate(),
-            'k_intra': 1,
-            'sq_err': 1e-5, 'sq_dur': 1e-12, # Extremely fast, but high loss (simulated as error)
-            'intra_err': 1e-1, 'intra_dur': 1e-11
+        self.topology = self.config.get("topology")
+
+        # 2. Extract topology parameters
+        self.n_blocks_row = self.topology.get("n_blocks_row", 2)
+        self.n_blocks_col = self.topology.get("n_blocks_col", 2)
+        self.n = self.topology.get("n", 10)
+        self.m = self.topology.get("m", 10)
+        self.k_intra = self.topology.get("k_intra", self.n * self.m) # Default to fully connected locally
+        self.k_inter = self.topology.get("k_inter", 1)
+        self.connector_local = self.topology.get("connector_local", 1)
+        
+
+        # 3. Validate and parse the profile from the configuration
+        self._validate_and_parse_profile()
+
+        # 4. Build the underlying geometry for the target using the provided topology parameters
+        self.cmap, self.total_qubits = k_nearest_tiled_coupling_map(
+            n_blocks_row=self.n_blocks_row, 
+            n_blocks_col=self.n_blocks_col,
+            n=self.n, 
+            m=self.m, 
+            k_intra=self.k_intra, 
+            k_inter=self.k_inter, 
+            connector_local=self.connector_local
+        )
+        
+        self.n_block = self.n * self.m
+        
+        # 5. Initialize parent Qiskit Target
+        super().__init__()
+        
+        # 6. Populate Target with the dynamically loaded gates
+        self._populate_instructions()
+
+    def _validate_and_parse_profile(self):
+        """Validates the input profile and converts string names to Qiskit gates."""
+        profile = self.config.get("profile")
+        if not profile:
+            raise ValueError("Configuration must contain a 'profile' dictionary defining the architecture.")
+
+        # -- Checks: Architecture Completeness --
+        
+        # 1. Single Qubit Gates
+        sq_gate_names = profile.get("sq_gates", [])
+        print(f"Debug: sq_gate_names from profile: {sq_gate_names}")
+        if not sq_gate_names or not isinstance(sq_gate_names, list):
+            raise ValueError("Profile must include a valid list of 'sq_gates' (e.g., ['HGate', 'TGate']).")
+        
+        if len(sq_gate_names) < 2:
+            print("Warning: Profile has fewer than 2 single-qubit gates. This may not form a universal gate set.")
+
+        # 2. Two Qubit Gates
+        two_q_gate_name = profile.get("two_q_gate")
+        if not two_q_gate_name or not isinstance(two_q_gate_name, str):
+            raise ValueError("Profile must specify minimum one 'two_q_gate' as a string (e.g., 'CXGate').")
+
+        # 3. Required Metrics
+        required_metrics = ['sq_err', 'sq_dur', 'intra_err', 'intra_dur']
+        for metric in required_metrics:
+            if metric not in profile:
+                raise ValueError(f"Profile is missing required performance property: '{metric}'.")
+
+        # Save metrics to instance
+        try:
+            self.sq_err = float(profile['sq_err'])
+            self.sq_dur = float(profile['sq_dur'])
+            self.intra_err = float(profile['intra_err'])
+            self.intra_dur = float(profile['intra_dur'])
+            
+            # You can also cast the inter-block properties parsed in the __init__ here
+            self.inter_err = float(self.config.get("inter_err", 0.05))
+            self.inter_dur = float(self.config.get("inter_dur", 1e-6))
+            
+        except (ValueError, TypeError):
+            raise TypeError("All error rates and durations must be numeric values (int or float).")
+        
+
+        # -- String to Qiskit Object Conversion --
+        self.sq_gates = [self._instantiate_gate(name) for name in sq_gate_names]
+        self.two_q_gate = self._instantiate_gate(two_q_gate_name)
+
+    def _instantiate_gate(self, gate_name: str):
+        """Dynamically fetches a gate class from qiskit.circuit.library and instantiates it."""
+        if not hasattr(qlib, gate_name):
+            raise ValueError(f"Gate '{gate_name}' is not recognized in qiskit.circuit.library.")
+        
+        gate_class = getattr(qlib, gate_name)
+        
+
+        # Qiskit basis gates for Targets only need a dummy instance.
+        # Try standard instantiation, and fallback to providing dummy angles (0) 
+        # for parameterized gates like RZGate, U2Gate, or U3Gate.
+        try:
+            return gate_class()
+        except TypeError:
+            try:
+                return gate_class(0)
+            except TypeError:
+                try:
+                    return gate_class(0, 0)
+                except TypeError:
+                    return gate_class(0, 0, 0)
+
+    def _populate_instructions(self):
+        """Internal method to add gates and error rates to the Target."""
+        sq_props = {
+            (q,): InstructionProperties(error=self.sq_err, duration=self.sq_dur) 
+            for q in range(self.total_qubits)
         }
-    }
-   
-    prof = profiles.get(arch_type, profiles['Fault Tolerant'])
+        for gate in self.sq_gates:
+            self.add_instruction(gate, sq_props)
 
+        two_q_props = {}
+        for q1, q2 in self.cmap.get_edges():
+            if (q1 // self.n_block) == (q2 // self.n_block):
+                # Local Connection
+                two_q_props[(q1, q2)] = InstructionProperties(
+                    error=self.intra_err, duration=self.intra_dur
+                )
+            else:
+                # Network Connection
+                two_q_props[(q1, q2)] = InstructionProperties(
+                    error=self.inter_err, duration=self.inter_dur
+                )
+        self.add_instruction(self.two_q_gate, two_q_props)
+
+    def to_json(self, filepath: str):
+        with open(filepath, 'w') as f:
+            json.dump(self.config, f, indent=4)
+        print(f"Target configuration saved to {filepath}")
+
+    @classmethod
+    def from_json(cls, filepath: str):
+        with open(filepath, 'r') as f:
+            config = json.load(f)
+        return cls(config)
     
-    # Apply overrides if provided
-    sq_err = custom_sq_error or prof['sq_err']
-    intra_err = custom_2q_error or prof['intra_err']
-    if k_intra is None:
-        k_intra = prof['k_intra'] if prof['k_intra'] is not None else n*m
-    else:
-        print(f"Using custom k_intra={k_intra} instead of profile default {prof['k_intra']}") if prof['k_intra'] is not None else 'Fully Connected'
-    # 2. Setup Topology
 
+    def plot(self, filename: str = None, gap: int = 3):
+        """Plots the coupling map using the structured grid layout."""
+        pos = {}
+        for qubit_id in range(self.total_qubits):
+            block_id = qubit_id // self.n_block
+            br_idx = block_id // self.n_blocks_col
+            bc_idx = block_id % self.n_blocks_col
+            
+            local_id = qubit_id % self.n_block
+            r = local_id // self.m
+            c = local_id % self.m
+            
+            # Add the gap multiplier to visually separate the computers
+            x = (bc_idx * (self.m + gap)) + c
+            y = -((br_idx * (self.n + gap)) + r)
+            pos[qubit_id] = [x, y]
 
-    cmap = k_nearest_tiled_coupling_map(
-        n_blocks_row=n_blocks_row, 
-        n_blocks_col=n_blocks_col,
-        n=n, 
-        m=m, 
-        k_intra=k_intra, 
-        k_inter=k_inter, 
-        connector_local=connector_local
-    )
-    
-    target = Target(num_qubits=cmap.size())
-    n_block = n * m
+        # 1. Create a standard NetworkX graph
+        G = nx.DiGraph()
+        
+        # 2. Add nodes to ensure disconnected qubits still show up
+        G.add_nodes_from(range(self.total_qubits))
+        
+        # 3. Add edges from your coupling map
+        G.add_edges_from(self.cmap.get_edges())
 
-    # 3. Add Single-Qubit Gates
-    sq_props = {(q,): InstructionProperties(error=sq_err, duration=prof['sq_dur']) 
-                for q in range(cmap.size())}
-    
-    for gate in prof['sq_gates']:
-        target.add_instruction(gate, sq_props)
-
-    # 4. Add Two-Qubit Gates (Intra vs Inter)
-    # Note: For Networked computing, we assume "Network Link" 
-    # can be converted to the native 2Q gate through local operations.
-    two_q_gate = prof['two_q_gate']
-    two_q_props = {}
-    
-    # We define network performance (Inter-block)
-    # Photonic links are often the bottleneck for all these architectures
-    # 1 microsecond latency is common for optical interconnects
-
-    for q1, q2 in cmap.get_edges():
-        if (q1 // n_block) == (q2 // n_block):
-            # Local Connection
-            two_q_props[(q1, q2)] = InstructionProperties(error=intra_err, duration=prof['intra_dur'])
+        # 4. Draw using NetworkX
+        aspect_ratio = (self.n_blocks_col * (self.m + gap)) / (self.n_blocks_row * (self.n + gap))
+        plt.figure(figsize=(10 * aspect_ratio, 10))  # Adjust width based on aspect ratio
+        nx.draw(
+            G,
+            pos=pos,
+            node_size=100,
+            with_labels=False,
+            edge_color="#A0A0A0",
+            node_color="#3498DB",
+            arrows=False  # Set to True if you want to see edge directionality
+        )
+        
+        if filename is not None:
+            plt.savefig(filename, dpi=300, bbox_inches="tight")
+            print(f"Plot saved to {filename}")
         else:
-            # Network Connection
-            two_q_props[(q1, q2)] = InstructionProperties(error=inter_err, duration=inter_dur)
-
-    target.add_instruction(two_q_gate, two_q_props)
-    
-    return target
+            plt.show()
