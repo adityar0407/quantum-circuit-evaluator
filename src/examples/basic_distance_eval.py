@@ -1,4 +1,5 @@
 import time
+import os
 import math
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -10,7 +11,10 @@ from metrics.metrics_evaluator import calculate_circuit_success_chance, get_tota
 
 def calculate_logical_profile(d: int, p_phys: float = 1e-3, p_th: float = 1e-2, t_cycle: float = 1e-6):
     """
-    Calculates the logical error rate and gate duration for a given surface code distance.
+    "Following standard surface code resource estimation methodologies 
+    [Fowler et al., 2012; Litinski, 2019], we model the logical error rate of our target blocks as an exponential decay 
+    with respect to code distance, while bounding logical gate duration by the O(d) 
+    syndrome cycles required for lattice surgery."
     """
     # Exponential suppression of errors
     logical_err = 0.1 * (p_phys / p_th)**((d + 1) / 2)
@@ -54,15 +58,14 @@ def study_code_distance_scaling(logical_qc: QuantumCircuit, distances: list = [3
                 "sq_err": p_L,          # Updated based on d
                 "sq_dur": t_L,          # Updated based on d
                 "intra_err": p_L * 1.5, # Assume local logical 2Q gates are slightly worse
-                "intra_dur": t_L * 2
-            },
-            # Network overhead (routing logical information between separate modules)
-            "inter_err": p_L * 5,    
-            "inter_dur": t_L * 10
+                "intra_dur": t_L * 2,
+                "inter_err": p_L * 5,    
+                "inter_dur": t_L * 10
+            }
         }
 
         target = FTarget(config)
-        pm = generate_preset_pass_manager(optimization_level=3, target=target, scheduling_method="alap")
+        pm = generate_preset_pass_manager(optimization_level=3, target=target, scheduling_method="alap", seed_transpiler=1738)
         
         try:
             transpiled_qc = pm.run(logical_qc)
@@ -107,6 +110,7 @@ def plot_distance_tradeoffs(df: pd.DataFrame):
 
     plt.title('Fault-Tolerant Tradeoff: Success Probability vs. Execution Time', fontsize=14)
     fig.tight_layout()
+    os.makedirs("example_2", exist_ok=True)
     plt.savefig("example_2/code_distance_tradeoff.png", dpi=300)
     plt.show()
 

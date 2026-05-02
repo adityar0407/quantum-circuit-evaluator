@@ -1,4 +1,4 @@
-from hardware.connectivity import generate_modular_ft_lattice, k_nearest_tiled_coupling_map
+from hardware.connectivity import k_nearest_tiled_coupling_map, generate_modular_layout
 import json
 import matplotlib.pyplot as plt
 from qiskit.transpiler import Target, InstructionProperties
@@ -19,7 +19,7 @@ class FTarget(Target):
         self.config.update(kwargs)
         
 
-
+        
 
         self.topology = self.config.get("topology")
 
@@ -33,8 +33,11 @@ class FTarget(Target):
             self.n = self.topology.get("n", 10)
             self.m = self.topology.get("m", 10)
             self.k_intra = self.topology.get("k_intra", self.n * self.m) # Default to fully connected locally
-            self.k_inter = self.topology.get("k_inter", 1)
+
+            
+            self.k_inter = self.topology.get("k_inter", 1) # default to nearest neighbor
             self.connector_local = self.topology.get("connector_local", 1)
+
 
             # 2.1. Build the underlying geometry for the target using the provided topology parameters
             self.cmap, self.total_qubits = k_nearest_tiled_coupling_map(
@@ -72,12 +75,12 @@ class FTarget(Target):
             self.n_blocks_col = self.topology.get("n_blocks_col", 2)
             self.k_inter = self.topology.get("k_inter", 1)
             self.d = self.topology.get("d", 5)  # Number of data qubits per side in the base block
-            self.cmap, self.total_qubits, self.n_block, self.pos = generate_modular_ft_lattice(
+            self.cmap, self.total_qubits, self.n_block, self.pos = generate_modular_layout(
                 architecture=self.type,
                 d=self.topology.get("d", 5),
-                n_blocks_row=self.n_blocks_row,
-                n_blocks_col=self.n_blocks_col,
-                k_inter=self.k_inter  # Pass your connection distribution density here!
+                rows=self.n_blocks_row,
+                cols=self.n_blocks_col,
+                interconnect=self.k_inter  # Pass your connection distribution density here!
             )
             self._is_local_edge = lambda q1, q2: (q1 // self.n_block) == (q2 // self.n_block)
             
@@ -107,46 +110,44 @@ class FTarget(Target):
         if not profile:
             raise ValueError("Configuration must contain a 'profile' dictionary defining the architecture.")
 
-        # -- Checks: Architecture Completeness --
+        # -- 1. Single Qubit Gates --
+        # Default to empty dict instead of list for safety
+        self.sq_gate_dict = profile.get("sq_gates", {}) 
         
-        # 1. Single Qubit Gates
-        sq_gate_names = profile.get("sq_gates", [])
-        print(f"Debug: sq_gate_names from profile: {sq_gate_names}")
-        if not sq_gate_names or not isinstance(sq_gate_names, list):
-            raise ValueError("Profile must include a valid list of 'sq_gates' as a list of strings (e.g., ['HGate', 'TGate']).")
-        
+        if not isinstance(self.sq_gate_dict, dict) or not self.sq_gate_dict:
+            raise ValueError("Profile must include a valid dict of 'sq_gates' (e.g., {'HGate': {'error':1e-4, 'duration':1e-5}}).")
+
+        sq_gate_names = list(self.sq_gate_dict.keys())
+
+
+        # Validate numeric properties
+        for gate, props in self.sq_gate_dict.items():
+            if not isinstance(props.get('error'), (int, float)) or not isinstance(props.get('duration'), (int, float)):
+                raise ValueError(f"Single-qubit gate '{gate}' needs numeric float values for 'error' and 'duration'.")
+
         if len(sq_gate_names) < 2:
             print("Warning: Profile has fewer than 2 single-qubit gates. This may not form a universal gate set.")
 
-        # 2. Two Qubit Gates
-        two_q_gate_names = profile.get("two_q_gates", [])
-        if not two_q_gate_names or not isinstance(two_q_gate_names, list):
-            raise ValueError("Profile must specify minimum one 'two_q_gates' as a list of strings (e.g., 'CXGate').")
-
-        # 3. Required Metrics
-        required_metrics = ['sq_err', 'sq_dur', 'intra_err', 'intra_dur']
-        for metric in required_metrics:
-            if metric not in profile:
-                raise ValueError(f"Profile is missing required performance property: '{metric}'.")
-
-        # Save metrics to instance
-        try:
-            self.sq_err = float(profile['sq_err'])
-            self.sq_dur = float(profile['sq_dur'])
-            self.intra_err = float(profile['intra_err'])
-            self.intra_dur = float(profile['intra_dur'])
-            
-           
-            self.inter_err = float(profile.get("inter_err", 0.05))
-            self.inter_dur = float(profile.get("inter_dur", 1e-6))
-            
-        except (ValueError, TypeError):
-            raise TypeError("All error rates and durations must be numeric values (int or float).")
+        # -- 2. Two Qubit Gates --
+        self.two_q_gate_dict = profile.get("two_q_gates", {})
         
+        if not isinstance(self.two_q_gate_dict, dict) or not self.two_q_gate_dict:
+            raise ValueError("Profile must specify at least one 'two_q_gates' dict.")
+            
+        two_q_gate_names = list(self.two_q_gate_dict.keys())
+        
+        # Validate local vs inter-module properties
+        for gate, props in self.two_q_gate_dict.items():
+            required_keys = ['local_error', 'local_duration', 'inter_error', 'inter_duration']
+            for key in required_keys:
+                if not isinstance(props.get(key), (int, float)):
+                    raise ValueError(f"Two-qubit gate '{gate}' needs numeric float values for '{key}'.")
 
-        # -- String to Qiskit Object Conversion --
-        self.sq_gates = [self._instantiate_gate(name) for name in sq_gate_names]
-        self.two_q_gates = [self._instantiate_gate(name) for name in two_q_gate_names]
+        # -- 3. String to Qiskit Object Conversion --
+        # Store as dictionaries tying the name to the instantiated object
+        self.sq_gates_objs = {name: self._instantiate_gate(name) for name in sq_gate_names}
+        self.two_q_gates_objs = {name: self._instantiate_gate(name) for name in two_q_gate_names}
+
 
     def _instantiate_gate(self, gate_name: str):
         """Dynamically fetches a gate class from qiskit.circuit.library and instantiates it."""
@@ -155,10 +156,6 @@ class FTarget(Target):
         
         gate_class = getattr(qlib, gate_name)
         
-
-        # Qiskit basis gates for Targets only need a dummy instance.
-        # Try standard instantiation, and fallback to providing dummy angles (0) 
-        # for parameterized gates like RZGate, U2Gate, or U3Gate.
         try:
             return gate_class()
         except TypeError:
@@ -170,24 +167,40 @@ class FTarget(Target):
                 except TypeError:
                     return gate_class(0, 0, 0)
 
-    def _populate_instructions(self):
-        """Internal method to add gates and error rates to the Target."""
-        sq_props = {
-            (q,): InstructionProperties(error=self.sq_err, duration=self.sq_dur) 
-            for q in range(self.total_qubits)
-        }
-        for gate in self.sq_gates:
-            self.add_instruction(gate, sq_props)
 
-        two_q_props = {}
-        for q1, q2 in self.cmap.get_edges():
-            # call the local vs network edge logic to assign appropriate error/duration
-            if self._is_local_edge(q1, q2):
-                two_q_props[(q1, q2)] = InstructionProperties(error=self.intra_err, duration=self.intra_dur)
-            else:
-                two_q_props[(q1, q2)] = InstructionProperties(error=self.inter_err, duration=self.inter_dur)
-        for gate in self.two_q_gates:
-            self.add_instruction(gate, two_q_props)
+    def _populate_instructions(self):
+        """Internal method to add specific gates and their unique error rates to the Target."""
+        
+        # 1. Populate Single Qubit Gates
+        for gate_name, gate_obj in self.sq_gates_objs.items():
+            # Fetch the specific dictionary for this gate
+            gate_props = self.sq_gate_dict[gate_name]
+            
+            sq_props = {
+                (q,): InstructionProperties(error=gate_props['error'], duration=gate_props['duration']) 
+                for q in range(self.total_qubits)
+            }
+            self.add_instruction(gate_obj, sq_props)
+
+        # 2. Populate Two Qubit Gates
+        for gate_name, gate_obj in self.two_q_gates_objs.items():
+            gate_props = self.two_q_gate_dict[gate_name]
+            two_q_props = {}
+            
+            for q1, q2 in self.cmap.get_edges():
+                # Apply local or inter-module properties dynamically based on edge type
+                if self._is_local_edge(q1, q2):
+                    two_q_props[(q1, q2)] = InstructionProperties(
+                        error=gate_props['local_error'], 
+                        duration=gate_props['local_duration']
+                    )
+                else:
+                    two_q_props[(q1, q2)] = InstructionProperties(
+                        error=gate_props['inter_error'], 
+                        duration=gate_props['inter_duration']
+                    )
+            
+            self.add_instruction(gate_obj, two_q_props)
 
     def to_json(self, filepath: str):
         with open(filepath, 'w') as f:
@@ -220,10 +233,9 @@ class FTarget(Target):
                 pos[qubit_id] = [x, y]
                 
         elif self.type in ["heavy_hex", "heavy_square"]:
-            pos = self.pos  # Grab the pre-calculated positions from __init__
+            pos = self.pos  
             
         else:
-            # Fallback for custom maps
             G_temp = nx.Graph(self.cmap.get_edges())
             pos = nx.spring_layout(G_temp)
 
@@ -232,28 +244,94 @@ class FTarget(Target):
         G.add_nodes_from(range(self.total_qubits))
         G.add_edges_from(self.cmap.get_edges())
 
-        # 3. Determine edge colors dynamically
-        edge_colors = [
-            "#A0A0A0" if self._is_local_edge(u, v) else "#E74C3C" 
-            for u, v in G.edges()
-        ]
+        # ==========================================
+        # 3. Group Edges by Distance
+        # ==========================================
+        local_edges = []
+        inter_edges_by_dist = {}  # Dictionary to group long-range edges by distance
+        
+        for u, v in G.edges():
+            if self._is_local_edge(u, v):
+                local_edges.append((u, v))
+            else:
+                # Reverse-engineer block coordinates for node u
+                block_u = u // self.n_block
+                br_u = block_u // self.n_blocks_col
+                bc_u = block_u % self.n_blocks_col
+                
+                # Reverse-engineer block coordinates for node v
+                block_v = v // self.n_block
+                br_v = block_v // self.n_blocks_col
+                bc_v = block_v % self.n_blocks_col
+                
+                # Calculate distance using your Chebyshev (max ray) logic
+                dist = max(abs(br_u - br_v), abs(bc_u - bc_v))
+                
+                # Group the edge into the dictionary based on its distance
+                if dist not in inter_edges_by_dist:
+                    inter_edges_by_dist[dist] = []
+                inter_edges_by_dist[dist].append((u, v))
 
-        # 4. Draw
+        # 4. Canvas Setup
         if self.type == "tiled_k_nearest":
             aspect_ratio = (self.n_blocks_col * (self.m + gap)) / max(1, (self.n_blocks_row * (self.n + gap)))
+            import matplotlib.pyplot as plt # Ensure plt is available
             plt.figure(figsize=(10 * aspect_ratio, 10))
         else:
+            import matplotlib.pyplot as plt
             plt.figure(figsize=(12, 12))
 
-        nx.draw(
-            G,
-            pos=pos,
-            node_size=100,
-            with_labels=False,
-            edge_color=edge_colors,
-            node_color="#3498DB",
+        # 5. Layered Drawing Process
+        # Draw Nodes
+        nx.draw_networkx_nodes(
+            G, 
+            pos=pos, 
+            node_size=100, 
+            node_color="#3498DB"
+        )
+        
+        # Draw Local Edges (Straight, Gray)
+        nx.draw_networkx_edges(
+            G, 
+            pos=pos, 
+            edgelist=local_edges, 
+            edge_color="#A0A0A0", 
             arrows=False
         )
+        
+        # ==========================================
+        # Draw Inter-block Edges in Batches
+        # ==========================================
+        # Grab a discrete categorical colormap (tab10 gives 10 highly distinct colors)
+        cmap = plt.get_cmap("tab10") 
+        
+        # Sort the dictionary so we draw distance 1, then distance 2, etc.
+        for dist, edges in sorted(inter_edges_by_dist.items()):
+            
+            # Map the distance to a specific color in the colormap
+            # (We use dist % 10 just in case k_inter > 10, to prevent index errors)
+            color = cmap(dist % 10)
+            
+            # Dynamically calculate curvature! Longer distances get taller arcs.
+            # dist 1 = 0.2 rad, dist 2 = 0.3 rad, dist 3 = 0.4 rad, etc.
+            if self.type == "tiled_k_nearest":
+
+                dynamic_rad = 0.1 + (dist * 0.1)
+            elif self.type == "heavy_hex" or self.type == "heavy_square":
+                dynamic_rad = 0
+            
+            nx.draw_networkx_edges(
+                G, 
+                pos=pos, 
+                edgelist=edges, 
+                edge_color=[color] * len(edges), # Apply the specific color to this batch
+                arrows=True,             
+                arrowstyle="-",          
+                connectionstyle=f"arc3,rad={dynamic_rad}" 
+            )
+
+        # Cleanup and Save/Show
+        plt.axis('off') 
         
         if filename is not None:
             plt.savefig(filename, dpi=300, bbox_inches="tight")

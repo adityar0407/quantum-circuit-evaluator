@@ -4,6 +4,9 @@ import pandas as pd
 from qiskit.transpiler import CouplingMap
 import networkx as nx
 import matplotlib.pyplot as plt
+import numpy as np
+from scipy.optimize import minimize_scalar
+import math
 
 CONNECTIVITY_MAP_DIR = Path(__file__).resolve().parents[1] / "connectivity_maps"
 
@@ -64,20 +67,6 @@ def _block_edges(n, m, k):
                         edges.add(tuple(sorted((q, q2))))
     return sorted(edges)
 
-# helper function for building the hexagonal and square lattice coupling maps
-def get_evenly_spaced_ports(port_list: list, k: int) -> list:
-    """Returns k evenly spaced elements from a list."""
-    if k <= 0 or not port_list:
-        return []
-    if k >= len(port_list):
-        return port_list
-    if k == 1:
-        # For a single connection, the middle of the edge is the most efficient spot
-        return [port_list[len(port_list) // 2]]
-    
-    # Calculate the exact step size to include both endpoints if possible
-    step = (len(port_list) - 1) / (k - 1)
-    return [port_list[int(round(i * step))] for i in range(k)]
 
 def k_nearest_tiled_coupling_map(
     n_blocks_row: int,
@@ -123,7 +112,7 @@ def k_nearest_tiled_coupling_map(
 
     def get_centered_edge_indices(length: int, step: int) -> range:
         """
-        Returns a range of indices stepping by `step`, perfectly 
+        Returns a range of indices stepping by `step`,  
         centered within the `length` of the edge.
         """
         # Calculate how many full steps fit in the length
@@ -150,17 +139,24 @@ def k_nearest_tiled_coupling_map(
             
             for br2 in range(n_blocks_row):
                 for bc2 in range(n_blocks_col):
-                    if br == br2 and bc == bc2: continue
+                    if br == br2 and bc == bc2: 
+                        continue
                     
-                    # Manhattan distance between blocks
-                    block_dist = abs(br2 - br) + abs(bc2 - bc)
+                    dr = br2 - br
+                    dc = bc2 - bc
                     
-                    if 1 <= block_dist <= k_inter:
-                        offset_b = block_offset(br2, bc2)
+                    # Determine if the target block is on a valid horizontal, vertical, or exact diagonal ray,
+                    # AND if it is within the k_inter range.
+                    is_valid_ray = False
+                    if dr == 0 and 0 < abs(dc) <= k_inter:
+                        is_valid_ray = True  # Horizontal
+                    elif dc == 0 and 0 < abs(dr) <= k_inter:
+                        is_valid_ray = True  # Vertical
+                    elif abs(dr) == abs(dc) and 0 < abs(dr) <= k_inter:
+                        is_valid_ray = True  # Diagonal
                         
-                        # Calculate relative direction (up, down, left, right) to determine which edges to connect
-                        dr = br2 - br
-                        dc = bc2 - bc
+                    if is_valid_ray:
+                        offset_b = block_offset(br2, bc2)
                         
                         # Right Edge
                         if dc > 0 and dr == 0:
@@ -191,11 +187,13 @@ def k_nearest_tiled_coupling_map(
                                 edge_set.add(tuple(sorted((q_a, q_b))))
 
                         # Diagonals (Lock to the nearest corners to prevent messy crossed wires)
-                        elif abs(dr) == 1 and abs(dc) == 1:
+                        elif abs(dr) == abs(dc):
+                            # This correctly sets the corner indices no matter how far away (k_inter) the block is
                             r_a = n-1 if dr > 0 else 0
                             c_a = m-1 if dc > 0 else 0
                             r_b = 0 if dr > 0 else n-1
                             c_b = 0 if dc > 0 else m-1
+                            
                             q_a = offset_a + (r_a * m + c_a)
                             q_b = offset_b + (r_b * m + c_b)
                             edge_set.add(tuple(sorted((q_a, q_b))))
@@ -214,165 +212,331 @@ def k_nearest_tiled_coupling_map(
     return (cmap, _size)
 
 
+
+
+
+# helper function for building the hexagonal and square lattice coupling maps
+def get_evenly_spaced_ports(port_list: list, k: int) -> list:
+    """Returns k evenly spaced elements from a list."""
+    if k <= 0 or not port_list:
+        return []
+    if k >= len(port_list):
+        return port_list
+    if k == 1:
+        # For a single connection, the middle of the edge is the most efficient spot
+        return [port_list[len(port_list) // 2]]
+    
+    # Calculate the exact step size to include both endpoints if possible
+    step = (len(port_list) - 1) / (k - 1)
+    return [port_list[int(round(i * step))] for i in range(k)]
 # will insert method to construct the coupling map for heavy hex and heavy square arcitectures, given number of qubits per block and number of blocks to consider
 
 #In the heavy-hex architecture, data qubits sit on the vertices and edges of the hexagons. 
 # To minimize error cascades and avoid disrupting the inner surface code stabilizers, network interconnects must be attached to boundary 
 # data qubits—specifically, qubits on the perimeter of the lattice that have fewer native connections (degree ≤ 2$).
 
-def generate_modular_ft_lattice(
-    architecture: str = "heavy_hex", 
-    d: int = 5, # number of data qubits per side in the base block (e.g., d=5 for a distance-5 surface code block)
-    n_blocks_row: int = 2, 
-    n_blocks_col: int = 2,
-    k_inter: int = 1  # Number of interconnects between adjacent QPUs
-) -> tuple[CouplingMap, int, int, dict]:
+def orient_by_triangle(pos, corner_list):
     """
-    Creates a 2D network of Fault-Tolerant QPUs (Heavy Hex or Heavy Square).
-    Automatically identifies boundary data qubits to form the network links.
+    Identifies the pivot corner of the 3-point triangle, calculates its angle, 
+    and rotates the entire graph so the layout sits perfectly square to the axes.
     """
-    # 1. Generate base Logical QPU
+    c1, c2, c3 = corner_list
+    p1, p2, p3 = pos[c1], pos[c2], pos[c3]
+
+    # Fast squared distance helper
+    def sq_dist(pa, pb):
+        return (pa[0] - pb[0])**2 + (pa[1] - pb[1])**2
+
+    # 1. Calculate the lengths of the three sides of the triangle
+    d12 = sq_dist(p1, p2)
+    d23 = sq_dist(p2, p3)
+    d31 = sq_dist(p3, p1)
+
+    # 2. Identify the "Pivot" (the corner opposite the longest side / diagonal)
+    if d12 >= d23 and d12 >= d31:
+        # Diagonal is c1-c2, therefore c3 is the 90-degree corner
+        pivot, edge_pt = c3, c1 
+    elif d23 >= d12 and d23 >= d31:
+        # Diagonal is c2-c3, therefore c1 is the 90-degree corner
+        pivot, edge_pt = c1, c2 
+    else:
+        # Diagonal is c3-c1, therefore c2 is the 90-degree corner
+        pivot, edge_pt = c2, c3 
+
+    # 3. Calculate the angle of the line connecting the Pivot to the Edge Point
+    dx = pos[edge_pt][0] - pos[pivot][0]
+    dy = pos[edge_pt][1] - pos[pivot][1]
+    
+    current_angle = np.arctan2(dy, dx)
+    
+    # 4. We want this edge to be perfectly horizontal (0 radians)
+    # The required rotation is simply the difference: Target (0) - Current
+    theta = 0 - current_angle
+
+    # 5. Apply the rotation matrix to all points
+    cos_t, sin_t = np.cos(theta), np.sin(theta)
+    
+    rotated_pos = {}
+    for n, (x, y) in pos.items():
+        # Standard 2D rotation formula around the origin (0,0)
+        rotated_pos[n] = (x * cos_t - y * sin_t, x * sin_t + y * cos_t)
+
+    return rotated_pos
+
+
+
+
+
+        
+
+def re_center(pos,total):
+    # a function that returns coordinates 
+
+    
+
+    #O(n^2)
+    avg_x = sum(coord[0] for coord in pos.values()) / total
+    avg_y = sum(coord[1] for coord in pos.values()) / total
+    
+
+    # centering
+    pos_centered = {n: (x - avg_x, y - avg_y) for n, (x, y) in pos.items()}
+    
+    
+    return  pos_centered
+
+import math
+
+def get_perimeter_data_qubits(d):
+    """
+    Utilizes indexing math to safely identify the boundary qubits by the 
+    depth of a circuit. 
+    """
+
+    # there's an indexing skip pattern I can use instead, basically:
+    # first row is top/bottom
+    # go up d-1 indicies and append that one and the next
+    # repeat until 
+
+    data_qubit_ids = d**2
+
+    one = []
+    two = []
+    three = []
+    
+    # the upper and lower are always the firsd d and last d^2-d
+    one.extend(list(range(0,d)))
+    three.extend(list(range(data_qubit_ids - d, data_qubit_ids)))
+    num = d - 1
+
+    #add the first edge, always 0
+    two.append(0)
+    two.append(num)
+
+    while True:
+        num += 1
+        two.append(num)
+        if num >= (data_qubit_ids - (d+1)):
+            break
+        num += (d-1)
+        two.append(num)
+    
+    #append the final edge, always the d^2'th one
+    two.append((d**2) - 1)
+    
+    return one, two, three
+    
+
+
+    
+            
+    
+
+
+
+def generate_modular_layout(architecture="heavy_hex", d=3, rows=2, cols=2, interconnect = 1):
+    # 1. Generate the base block and layout
     if architecture == "heavy_hex":
         base_cmap = CouplingMap.from_heavy_hex(d)
-        max_degree = 3  # Hex lattice max connections
+
     elif architecture == "heavy_square":
         base_cmap = CouplingMap.from_heavy_square(d)
-        max_degree = 4  # Square lattice max connections
+        
     else:
-        raise ValueError(f"Unsupported architecture: {architecture}")
-
-    n_block = base_cmap.size()
-    G_base = nx.Graph()
-    G_base.add_edges_from(base_cmap.get_edges())
-
-    # 2. Auto-discover the 2D geometry to find boundary data qubits
-    # kamada_kawai_layout perfectly rebuilds the 2D planar structure based on graph distances
-    local_pos = nx.kamada_kawai_layout(G_base)
+        raise KeyError("Need to give heavy_hex or heavy_square")
     
-    # 3. Identify Candidate "Data Qubits" on the boundary
-    boundary_nodes = [n for n, deg in G_base.degree() if deg < max_degree]
+    # data qubits are always d^2 !
     
-    # Find the absolute extreme coordinates of the QPU block
-    min_x = min(local_pos[n][0] for n in boundary_nodes)
-    max_x = max(local_pos[n][0] for n in boundary_nodes)
-    min_y = min(local_pos[n][1] for n in boundary_nodes)
-    max_y = max(local_pos[n][1] for n in boundary_nodes)
 
-    # Define a small tolerance (e.g., 20% of the width) to catch all nodes on that edge
-    tol_x = 0.2 * (max_x - min_x)
-    tol_y = 0.2 * (max_y - min_y)
+    n_total_per_block = base_cmap.size()
 
-    # Isolate all qubits that belong to each specific wall
-    left_wall = [n for n in boundary_nodes if local_pos[n][0] < min_x + tol_x]
-    right_wall = [n for n in boundary_nodes if local_pos[n][0] > max_x - tol_x]
-    bottom_wall = [n for n in boundary_nodes if local_pos[n][1] < min_y + tol_y]
-    top_wall = [n for n in boundary_nodes if local_pos[n][1] > max_y - tol_y]
+    # need a list of the edges to turn into graph
+    edge_list = list(base_cmap.get_edges())
+    # Use neato (via networkx) to get the local footprint
+    G_base = nx.Graph(edge_list)
 
-    # Sort the walls along their PERIMETER so they are in physical order
-    left_wall.sort(key=lambda n: local_pos[n][1])   # Sort Y
-    right_wall.sort(key=lambda n: local_pos[n][1])  # Sort Y
-    bottom_wall.sort(key=lambda n: local_pos[n][0]) # Sort X
-    top_wall.sort(key=lambda n: local_pos[n][0])    # Sort X
+    degree_one = [node for node, degree in G_base.degree() if degree == 1]
+    
+    corners = list()
+    if architecture == "heavy_hex":
+        corners.append(0)
+    elif architecture == "heavy_square":
+        corners.append(d-1)
 
-    # Sample them evenly using your chosen k_inter!
-    left_ports = get_evenly_spaced_ports(left_wall, k_inter)
-    right_ports = get_evenly_spaced_ports(right_wall, k_inter)
-    bottom_ports = get_evenly_spaced_ports(bottom_wall, k_inter)
-    top_ports = get_evenly_spaced_ports(top_wall, k_inter)
+    for ones in degree_one:
 
-    print(f"[{architecture.upper()} d={d}] Block Size: {n_block} physical qubits")
-    print(f"Evenly Distributed Ports -> L:{left_ports}, R:{right_ports}, T:{top_ports}, B:{bottom_ports}")
+        neighbor = next(G_base.neighbors(ones))
+        corners.append(neighbor)
+        
 
+    # Note: Requires pygraphviz or pydot
+    local_pos = nx.drawing.nx_agraph.graphviz_layout(G_base, prog='neato')
+    
+    local_pos = re_center(local_pos, n_total_per_block)
+
+    local_pos = orient_by_triangle(local_pos, corners)
+    
+
+    # gives lists of upper, lower, and left/right qubits
+    # not guarenteed that either x is the top or bottom but 
+    # doesn't change the connection logic, which would 
+    X_one, Y_both, X_two = get_perimeter_data_qubits(d)
+    # boolean check to find the order 
+    # if X_one is on top and if Y_both goes left-right
+    if local_pos[X_one[0]][1] < local_pos[X_two[0]][1]:
+        top = X_two
+        bottom = X_one
+    else:
+        top = X_one
+        bottom = X_two
+
+    if local_pos[Y_both[0]][0] < local_pos[Y_both[1]][0]:
+        left_start = 0
+    else:
+        left_start = 1
+    
+
+
+    # 2. Calculate Width and Height of the block
+    xs = [p[0] for p in local_pos.values()]
+    ys = [p[1] for p in local_pos.values()]
+
+    width = max(xs) - min(xs)
+    height = max(ys) - min(ys)
+    
+    # Add a 10% buffer so blocks have breathing room
+    pitch_x = width * 1.2
+    pitch_y = height * 1.2
+
+    
+    
+    global_pos = {}
     combined_edges = []
-    global_pos = {}  # Store the global coordinates for your plot() function
-    
-    # Define a visual spacing gap between the QPUs
-    gap_x = max(local_pos[n][0] for n in G_base.nodes) - min(local_pos[n][0] for n in G_base.nodes) + 1.5
-    gap_y = max(local_pos[n][1] for n in G_base.nodes) - min(local_pos[n][1] for n in G_base.nodes) + 1.5
 
-    # 4. Tile the Blocks and Interconnect Them
-    for r in range(n_blocks_row):
-        for c in range(n_blocks_col):
-            block_idx = r * n_blocks_col + c
-            offset = block_idx * n_block
+    lr_measure_idx = n_total_per_block * rows * cols
+    tb_measure_idx = lr_measure_idx + (len(Y_both)//2) * (cols-1) * rows
+
+    # 3. Tile and Shift
+    for r in range(rows):
+        for c in range(cols):
+
+            offset_idx = (r * cols + c) * n_total_per_block
+
+            dx, dy = c * pitch_x, -r * pitch_y
+
             
-            # Shift the local coordinates to global coordinates for plotting
-            for n in G_base.nodes:
-                global_pos[n + offset] = (local_pos[n][0] + (c * gap_x), local_pos[n][1] - (r * gap_y))
+
             
-            # A. Add Intra-block (Local) edges
+            for node, (lx, ly) in local_pos.items():
+                global_pos[node + offset_idx] = (lx + dx, ly + dy)
+            
             for q1, q2 in base_cmap.get_edges():
-                combined_edges.append((q1 + offset, q2 + offset))
-                
-            # B. Add Inter-block edges (Row connections: Right port to Left port)
-            if c < n_blocks_col - 1:
-                next_offset = r * n_blocks_col + (c + 1)
-                next_offset *= n_block
-                
-                for port_out, port_in in zip(right_ports, left_ports):
-                    combined_edges.append((port_out + offset, port_in + next_offset))
-                    combined_edges.append((port_in + next_offset, port_out + offset))
+                combined_edges.append((q1 + offset_idx, q2 + offset_idx))
+
+
+            # ---------------------------------------------------------
+            # 1. CONNECT UP (if not first row)
+            # ---------------------------------------------------------
+            if r != 0:
+                # Calculate the offset for the block directly above us
+                top_block_offset = ((r - 1) * cols + c) * n_total_per_block
+
+                # Iterate through your top/bottom boundary lists
+                for i in range(len(top)):
+                    curr_top_node = top[i] + offset_idx
+                    prev_bottom_node = bottom[i] + top_block_offset
+
+                    # Find the physical midpoint for the measurement qubit
+                    mx = (global_pos[curr_top_node][0] + global_pos[prev_bottom_node][0]) / 2.0
+                    my = (global_pos[curr_top_node][1] + global_pos[prev_bottom_node][1]) / 2.0
+
+                    # Register the measurement qubit position
+                    global_pos[tb_measure_idx] = (mx, my)
+
+                    # Connect: Previous Bottom -> Measure Qubit -> Current Top
+                    combined_edges.append((prev_bottom_node, tb_measure_idx))
+                    combined_edges.append((tb_measure_idx, curr_top_node))
+
+                    # Increment the top-bottom measurement index counter
+                    tb_measure_idx += 1
+
+
+            # ---------------------------------------------------------
+            # 2. CONNECT LEFT (if not first column)
+            # ---------------------------------------------------------
+            if c != 0:
+                # Calculate the offset for the block directly to our left
+                left_block_offset = (r * cols + (c - 1)) * n_total_per_block
+
+                # Set up the alternating indices based on your boolean
+                # If left_start == 0, lefts are even (0, 2, 4) and rights are odd (1, 3, 5)
+                # If left_start == 1, lefts are odd (1, 3, 5) and rights are even (0, 2, 4)
+                curr_left_start = left_start
+                prev_right_start = 1 - left_start # the opposite!
+
+                # Loop through the pairs in Y_both
+                for i in range(0, len(Y_both) // 2):
+                    curr_left_node = Y_both[i * 2 + curr_left_start] + offset_idx
+                    prev_right_node = Y_both[i * 2 + prev_right_start] + left_block_offset
+
+                    # Find the physical midpoint for the measurement qubit
+                    mx = (global_pos[curr_left_node][0] + global_pos[prev_right_node][0]) / 2.0
+                    my = (global_pos[curr_left_node][1] + global_pos[prev_right_node][1]) / 2.0
+
+                    # Register the measurement qubit position
+                    global_pos[lr_measure_idx] = (mx, my)
+
+                    # Connect: Previous Right -> Measure Qubit -> Current Left
+                    combined_edges.append((prev_right_node, lr_measure_idx))
+                    combined_edges.append((lr_measure_idx, curr_left_node))
+
+                    # Increment the left-right measurement index counter
+                    lr_measure_idx += 1
+
                     
-            # C. Add Inter-block edges (Col connections: Bottom port to Top port)
-            if r < n_blocks_row - 1:
-                down_offset = (r + 1) * n_blocks_col + c
-                down_offset *= n_block
-                
-                for port_out, port_in in zip(bottom_ports, top_ports):
-                    combined_edges.append((port_out + offset, port_in + down_offset))
-                    combined_edges.append((port_in + down_offset, port_out + offset))
-
-    final_cmap = CouplingMap(combined_edges)
-    return final_cmap, final_cmap.size(), n_block, global_pos
+    final_map = CouplingMap(combined_edges)
 
 
-
-def build_ft_style_coupling_map(
-    k_intra: int = 2,
-    k_inter: int = 1,
-) -> CouplingMap:
-    """
-    Build the custom multi-block k-nearest connectivity map used as the
-    FT-style architecture model.
-
-    This uses the same 2x2 tiled 10x10-block structure from main_pipeline.py.
-    It is a structural connectivity model only, not a full surface-code,
-    decoder, or noise simulation.
-    """
-    # connector_local is now interpreted as an edge-connector spacing / step
-    # size, so the smallest valid value is 1 rather than 0.
-    return k_nearest_tiled_coupling_map(
-        n_blocks_row=2,
-        n_blocks_col=2,
-        n=10,
-        m=10,
-        k_intra=k_intra,
-        k_inter=k_inter,
-        connector_local=1,
-    )
+    return final_map, final_map.size(), n_total_per_block, global_pos
 
 
-
-def get_benchmark_coupling_maps() -> dict[str, CouplingMap]:
-    """
-    Return all coupling maps used in the main NISQ-vs-FT-style benchmark.
-    """
-    return {
-        "IBM Fez heavy-hex": load_ibm_fez_coupling_map(),
-        "IBM Torino heavy-hex": load_ibm_torino_coupling_map(),
-        "Custom FT-style 2x2 tiled k-nearest": build_ft_style_coupling_map(
-            k_intra=2,
-            k_inter=1,
-        ),
-    }
-
-
-if __name__ == "__main__":
-    maps = get_benchmark_coupling_maps()
-
-    for name, cmap in maps.items():
-        print(name)
-        print("Total qubits :", cmap.size())
-        print("Total edges  :", len(cmap.get_edges()))
-        print("Is connected :", cmap.is_connected())
-        print()
+# get leftmost node, 
+def plot_modular_cmap(cmap, pos, type):
+        plt.figure(figsize=(10, 8))
+        G = nx.Graph(list(cmap.get_edges()))
+        
+        # Draw edges
+        nx.draw_networkx_edges(G, pos, alpha=0.3, edge_color='gray')
+        
+        # Draw Data Qubits in one color, Ancillas in another
+        # (Assuming first n_data in each block are data qubits)
+        # Just a simple color split for the demo:
+        nx.draw_networkx_nodes(G, pos, node_size=30, node_color='blue')
+        
+        plt.axis('off')
+        plt.title("Modular Fault-Tolerant Architecture (Proximity Stitching)")
+        plt.savefig(f"Heavy_{type}.png")
+        plt.show()
+        
+#     modular_cmap, x, z, positions = generate_modular_layout(architecture="heavy_hex",d=5, rows=2, cols=2)
+#     plot_modular_cmap(modular_cmap, positions)
