@@ -215,25 +215,11 @@ def k_nearest_tiled_coupling_map(
 
 
 
-# helper function for building the hexagonal and square lattice coupling maps
-def get_evenly_spaced_ports(port_list: list, k: int) -> list:
-    """Returns k evenly spaced elements from a list."""
-    if k <= 0 or not port_list:
-        return []
-    if k >= len(port_list):
-        return port_list
-    if k == 1:
-        # For a single connection, the middle of the edge is the most efficient spot
-        return [port_list[len(port_list) // 2]]
-    
-    # Calculate the exact step size to include both endpoints if possible
-    step = (len(port_list) - 1) / (k - 1)
-    return [port_list[int(round(i * step))] for i in range(k)]
-# will insert method to construct the coupling map for heavy hex and heavy square arcitectures, given number of qubits per block and number of blocks to consider
 
-#In the heavy-hex architecture, data qubits sit on the vertices and edges of the hexagons. 
-# To minimize error cascades and avoid disrupting the inner surface code stabilizers, network interconnects must be attached to boundary 
-# data qubits—specifically, qubits on the perimeter of the lattice that have fewer native connections (degree ≤ 2$).
+
+
+
+
 
 def orient_by_triangle(pos, corner_list):
     """
@@ -310,7 +296,7 @@ import math
 def get_perimeter_data_qubits(d):
     """
     Utilizes indexing math to safely identify the boundary qubits by the 
-    depth of a circuit. 
+    distance of the code. 
     """
 
     # there's an indexing skip pattern I can use instead, basically:
