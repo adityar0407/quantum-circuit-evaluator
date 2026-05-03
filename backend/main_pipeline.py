@@ -19,11 +19,9 @@ from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
 # Local project imports
 
 from target_creation.target import FTarget
-from examples.iterate_network_configurations import compare_arch, compare_architectures_example, plot_best_time_to_success, fault_tolerant_example
-from examples.basic_distance_eval import plot_distance_tradeoffs, study_code_distance_scaling
-from examples.shors import Shor
 
-from hardware.connectivity import generate_modular_layout, plot_modular_cmap, re_center, orient_by_triangle, get_perimeter_data_qubits
+
+from hardware.connectivity import generate_modular_layout, re_center, orient_by_triangle, get_perimeter_data_qubits
 
 
 
@@ -45,6 +43,17 @@ def main():
     #example1()
     #example2()
     #example3() 
+
+
+    
+
+
+
+
+
+
+
+
     test = {"topology": {
         "type": "heavy_hex",
         "n_blocks_row": 4,
@@ -60,7 +69,6 @@ def main():
         "two_q_gates": {
             "CXGate": {
                 "local_error": 1e-3, "local_duration": 1e-6,
-                "inter_error": 5e-2, "inter_duration": 3e-6
             }
         }
         }
@@ -83,12 +91,18 @@ def main():
         },
         "two_q_gates": {
             "CXGate": {
-                "local_error": 1e-3, "local_duration": 1e-6,
-                "inter_error": 5e-2, "inter_duration": 3e-6
+                "local_error": 1e-3, "local_duration": 1e-6
+            }
+        },
+        "inter_device_gates": {
+            "SwapGate": {
+                "inter_error" : 5e-2, "inter_duration": 1e-5
             }
         }
         }
     }
+
+    
 
 
 

@@ -5,8 +5,6 @@ from qiskit.transpiler import CouplingMap
 import networkx as nx
 import matplotlib.pyplot as plt
 import numpy as np
-from scipy.optimize import minimize_scalar
-import math
 
 CONNECTIVITY_MAP_DIR = Path(__file__).resolve().parents[1] / "connectivity_maps"
 
@@ -38,9 +36,20 @@ def load_ibm_torino_coupling_map() -> CouplingMap:
         CONNECTIVITY_MAP_DIR / "ibm_torino_connectivity.csv"
     )
 
+
+######################################################
+
+## CODE FOR K_NEAREST_NEIGHBOR CONNECTIVITY NETWORK ##
+
+######################################################
+
+
+
+
 ## helper function for building the tiled k-nearest coupling map
 def _block_edges(n, m, k):
     """Build undirected edges inside one n x m block."""
+
     edges = set()
 
     for r in range(n):
@@ -81,7 +90,7 @@ def k_nearest_tiled_coupling_map(
     each block has n rows and m columns of qubits, with k_intra nearest neighbor connectivity within the block.
     Blocks are arranged in a grid with n_blocks_row rows and n_blocks_col columns.
     Inter-block connectivity is determined by k_inter (which blocks are connected)
-    and connector_local (how many qubits on the edge are connected between blocks).
+    and connector_local (how many blocks a qubit can connect to).
     """
 
 
@@ -104,6 +113,8 @@ def k_nearest_tiled_coupling_map(
 
     edge_set = set()
 
+    # helper functions to return a given block ID and calculate the offset
+    # for global positioning
     def block_id(br, bc):
         return br * n_blocks_col + bc
 
@@ -123,7 +134,6 @@ def k_nearest_tiled_coupling_map(
 
     # Add all intra-block edges.
     local_edges = _block_edges(n, m, k_intra)
-
     for br in range(n_blocks_row):
         for bc in range(n_blocks_col):
             offset = block_offset(br, bc)
@@ -145,8 +155,8 @@ def k_nearest_tiled_coupling_map(
                     dr = br2 - br
                     dc = bc2 - bc
                     
-                    # Determine if the target block is on a valid horizontal, vertical, or exact diagonal ray,
-                    # AND if it is within the k_inter range.
+                    # Determine if the target block is on a valid horizontal, vertical, or 
+                    # exact diagonal ray AND if it is within the k_inter range.
                     is_valid_ray = False
                     if dr == 0 and 0 < abs(dc) <= k_inter:
                         is_valid_ray = True  # Horizontal
@@ -188,7 +198,7 @@ def k_nearest_tiled_coupling_map(
 
                         # Diagonals (Lock to the nearest corners to prevent messy crossed wires)
                         elif abs(dr) == abs(dc):
-                            # This correctly sets the corner indices no matter how far away (k_inter) the block is
+                            # sets the corner indices no matter how far away (k_inter) the block is
                             r_a = n-1 if dr > 0 else 0
                             c_a = m-1 if dc > 0 else 0
                             r_b = 0 if dr > 0 else n-1
@@ -197,6 +207,7 @@ def k_nearest_tiled_coupling_map(
                             q_a = offset_a + (r_a * m + c_a)
                             q_b = offset_b + (r_b * m + c_b)
                             edge_set.add(tuple(sorted((q_a, q_b))))
+
     # Add both directions since CouplingMap is directed.
     coupling_list = [[u, v] for u, v in edge_set] + [[v, u] for u, v in edge_set]
 
@@ -213,13 +224,15 @@ def k_nearest_tiled_coupling_map(
 
 
 
+######################################
+
+## CODE FOR HEAVY HEX AND HEAVY SQUARE
+
+######################################
 
 
 
-
-
-
-
+## helper functions for getting the network of generate_modular_layout
 
 def orient_by_triangle(pos, corner_list):
     """
@@ -229,16 +242,16 @@ def orient_by_triangle(pos, corner_list):
     c1, c2, c3 = corner_list
     p1, p2, p3 = pos[c1], pos[c2], pos[c3]
 
-    # Fast squared distance helper
+    # Fast squared distance helper, useful for trig relation
     def sq_dist(pa, pb):
         return (pa[0] - pb[0])**2 + (pa[1] - pb[1])**2
 
-    # 1. Calculate the lengths of the three sides of the triangle
+    # Calculate the lengths of the three sides of the triangle
     d12 = sq_dist(p1, p2)
     d23 = sq_dist(p2, p3)
     d31 = sq_dist(p3, p1)
 
-    # 2. Identify the "Pivot" (the corner opposite the longest side / diagonal)
+    # Identify the "Pivot" (the corner opposite the longest side / diagonal)
     if d12 >= d23 and d12 >= d31:
         # Diagonal is c1-c2, therefore c3 is the 90-degree corner
         pivot, edge_pt = c3, c1 
@@ -249,49 +262,34 @@ def orient_by_triangle(pos, corner_list):
         # Diagonal is c3-c1, therefore c2 is the 90-degree corner
         pivot, edge_pt = c2, c3 
 
-    # 3. Calculate the angle of the line connecting the Pivot to the Edge Point
+    # Calculate the angle of the line connecting the Pivot to the Edge Point
     dx = pos[edge_pt][0] - pos[pivot][0]
     dy = pos[edge_pt][1] - pos[pivot][1]
     
+    # arctan for angle 
     current_angle = np.arctan2(dy, dx)
     
-    # 4. We want this edge to be perfectly horizontal (0 radians)
+    # We want this edge to be perfectly horizontal (0 radians)
     # The required rotation is simply the difference: Target (0) - Current
     theta = 0 - current_angle
 
-    # 5. Apply the rotation matrix to all points
+    # Apply the rotation matrix to all points
     cos_t, sin_t = np.cos(theta), np.sin(theta)
     
-    rotated_pos = {}
-    for n, (x, y) in pos.items():
-        # Standard 2D rotation formula around the origin (0,0)
-        rotated_pos[n] = (x * cos_t - y * sin_t, x * sin_t + y * cos_t)
-
-    return rotated_pos
-
-
-
-
-
-        
+    
+    return {n : (x * cos_t - y * sin_t, x * sin_t + y * cos_t) for n, (x, y) in pos.items()}
 
 def re_center(pos,total):
-    # a function that returns coordinates 
 
-    
-
-    #O(n^2)
+    # re-center all points of the network graph
     avg_x = sum(coord[0] for coord in pos.values()) / total
     avg_y = sum(coord[1] for coord in pos.values()) / total
     
 
-    # centering
-    pos_centered = {n: (x - avg_x, y - avg_y) for n, (x, y) in pos.items()}
+    # centering logic
+    return {n: (x - avg_x, y - avg_y) for n, (x, y) in pos.items()}
     
-    
-    return  pos_centered
 
-import math
 
 def get_perimeter_data_qubits(d):
     """
@@ -299,11 +297,9 @@ def get_perimeter_data_qubits(d):
     distance of the code. 
     """
 
-    # there's an indexing skip pattern I can use instead, basically:
-    # first row is top/bottom
-    # go up d-1 indicies and append that one and the next
-    # repeat until 
+    # there's an indexing skip pattern I can use
 
+    # data qubits are always indexed up to d^2 
     data_qubit_ids = d**2
 
     one = []
@@ -315,19 +311,26 @@ def get_perimeter_data_qubits(d):
     three.extend(list(range(data_qubit_ids - d, data_qubit_ids)))
     num = d - 1
 
-    #add the first edge, always 0
+    #add the first/last edge, always index 0 and d-1
     two.append(0)
     two.append(num)
 
+
+    # loop the following
     while True:
+        # add one higher
         num += 1
         two.append(num)
+
+        # If I've hit the first top qubit or higher, stop
         if num >= (data_qubit_ids - (d+1)):
             break
+
+        # add index d-1 away (skip internal data qubits)
         num += (d-1)
         two.append(num)
     
-    #append the final edge, always the d^2'th one
+    #append the final edge index, always the d^2'th one
     two.append((d**2) - 1)
     
     return one, two, three
@@ -341,7 +344,7 @@ def get_perimeter_data_qubits(d):
 
 
 def generate_modular_layout(architecture="heavy_hex", d=3, rows=2, cols=2, interconnect = 1):
-    # 1. Generate the base block and layout
+    # Generate the base block and layout
     if architecture == "heavy_hex":
         base_cmap = CouplingMap.from_heavy_hex(d)
 
@@ -351,13 +354,14 @@ def generate_modular_layout(architecture="heavy_hex", d=3, rows=2, cols=2, inter
     else:
         raise KeyError("Need to give heavy_hex or heavy_square")
     
-    # data qubits are always d^2 !
     
-
+    
+    # numbr of qubits per blo k
     n_total_per_block = base_cmap.size()
 
     # need a list of the edges to turn into graph
     edge_list = list(base_cmap.get_edges())
+
     # Use neato (via networkx) to get the local footprint
     G_base = nx.Graph(edge_list)
 
@@ -375,17 +379,23 @@ def generate_modular_layout(architecture="heavy_hex", d=3, rows=2, cols=2, inter
         corners.append(neighbor)
         
 
-    # Note: Requires pygraphviz or pydot
+    # while not necessary for base connectivity, graphing is done here and saved in a 
+    # pos variable given complexity of the task
+    # could be good to move this elsewhere but was a major challenge to get working
+    
+    # create the network layout of a single logical qubit
     local_pos = nx.drawing.nx_agraph.graphviz_layout(G_base, prog='neato')
     
+    # normalize so the center is now located in the middle of the block
     local_pos = re_center(local_pos, n_total_per_block)
 
+    # orient the graph upright
     local_pos = orient_by_triangle(local_pos, corners)
     
 
     # gives lists of upper, lower, and left/right qubits
     # not guarenteed that either x is the top or bottom but 
-    # doesn't change the connection logic, which would 
+    # doesn't change the connection logic
     X_one, Y_both, X_two = get_perimeter_data_qubits(d)
     # boolean check to find the order 
     # if X_one is on top and if Y_both goes left-right
@@ -403,67 +413,80 @@ def generate_modular_layout(architecture="heavy_hex", d=3, rows=2, cols=2, inter
     
 
 
-    # 2. Calculate Width and Height of the block
+    # Calculate Width and Height of the block
     xs = [p[0] for p in local_pos.values()]
     ys = [p[1] for p in local_pos.values()]
 
     width = max(xs) - min(xs)
     height = max(ys) - min(ys)
     
-    # Add a 10% buffer so blocks have breathing room
+    # Add a 20% buffer so blocks have breathing room
     pitch_x = width * 1.2
     pitch_y = height * 1.2
 
     
-    
+    # global positioning graph and list of all
     global_pos = {}
     combined_edges = []
 
+    # indexing math to make sure intermediary measurement nodes between data qubits
+    # have unique index's. Left to right measurement index starts at 
+    # total number of qubits, top to bottom starts at that index times number
+    # of measure qubits per left/right and the number of rows / columns that 
+    # the left right data will have to fill
+
+    # basically start at total number of qubits then total number of 
+    # left/right measurement qubits
     lr_measure_idx = n_total_per_block * rows * cols
     tb_measure_idx = lr_measure_idx + (len(Y_both)//2) * (cols-1) * rows
 
-    # 3. Tile and Shift
+    # Tile and Shift, go row by row, left to right
     for r in range(rows):
         for c in range(cols):
 
+
+            # calculate offset index of each qubit inside a block
             offset_idx = (r * cols + c) * n_total_per_block
 
+            # get a position to start at 
             dx, dy = c * pitch_x, -r * pitch_y
 
             
 
-            
+            # place node in global position by offset
             for node, (lx, ly) in local_pos.items():
                 global_pos[node + offset_idx] = (lx + dx, ly + dy)
             
+            # get all inter-connected edges of new block
             for q1, q2 in base_cmap.get_edges():
                 combined_edges.append((q1 + offset_idx, q2 + offset_idx))
-
+                # follows inter-block connectivity logic of the surface code
+                # (i believe needs further testing)
 
             # ---------------------------------------------------------
             # 1. CONNECT UP (if not first row)
             # ---------------------------------------------------------
             if r != 0:
-                # Calculate the offset for the block directly above us
+                # calculate the offset for the block directly above us
                 top_block_offset = ((r - 1) * cols + c) * n_total_per_block
 
-                # Iterate through your top/bottom boundary lists
+                # iterate through your top/bottom boundary lists
                 for i in range(len(top)):
                     curr_top_node = top[i] + offset_idx
                     prev_bottom_node = bottom[i] + top_block_offset
 
-                    # Find the physical midpoint for the measurement qubit
+                    # find the physical midpoint for the measurement qubit
                     mx = (global_pos[curr_top_node][0] + global_pos[prev_bottom_node][0]) / 2.0
                     my = (global_pos[curr_top_node][1] + global_pos[prev_bottom_node][1]) / 2.0
 
-                    # Register the measurement qubit position
+                    # register the measurement qubit position
                     global_pos[tb_measure_idx] = (mx, my)
 
-                    # Connect: Previous Bottom -> Measure Qubit -> Current Top
+                    # connect: Previous Bottom -> Measure Qubit -> Current Top
                     combined_edges.append((prev_bottom_node, tb_measure_idx))
                     combined_edges.append((tb_measure_idx, curr_top_node))
 
-                    # Increment the top-bottom measurement index counter
+                    # increment the top-bottom measurement index counter
                     tb_measure_idx += 1
 
 
@@ -471,58 +494,37 @@ def generate_modular_layout(architecture="heavy_hex", d=3, rows=2, cols=2, inter
             # 2. CONNECT LEFT (if not first column)
             # ---------------------------------------------------------
             if c != 0:
-                # Calculate the offset for the block directly to our left
+                # calculate the offset for the block directly to our left
                 left_block_offset = (r * cols + (c - 1)) * n_total_per_block
 
-                # Set up the alternating indices based on your boolean
-                # If left_start == 0, lefts are even (0, 2, 4) and rights are odd (1, 3, 5)
-                # If left_start == 1, lefts are odd (1, 3, 5) and rights are even (0, 2, 4)
+                # set up the alternating indices based on your boolean
+                # if left_start == 0, lefts are even (0, 2, 4) and rights are odd (1, 3, 5)
+                # if left_start == 1, lefts are odd (1, 3, 5) and rights are even (0, 2, 4)
                 curr_left_start = left_start
-                prev_right_start = 1 - left_start # the opposite!
+                prev_right_start = 1 - left_start # opposite!
 
-                # Loop through the pairs in Y_both
+                # loop through the pairs in Y_both
                 for i in range(0, len(Y_both) // 2):
                     curr_left_node = Y_both[i * 2 + curr_left_start] + offset_idx
                     prev_right_node = Y_both[i * 2 + prev_right_start] + left_block_offset
 
-                    # Find the physical midpoint for the measurement qubit
+                    # find the physical midpoint for the measurement qubit
                     mx = (global_pos[curr_left_node][0] + global_pos[prev_right_node][0]) / 2.0
                     my = (global_pos[curr_left_node][1] + global_pos[prev_right_node][1]) / 2.0
 
-                    # Register the measurement qubit position
+                    # register the measurement qubit position
                     global_pos[lr_measure_idx] = (mx, my)
 
-                    # Connect: Previous Right -> Measure Qubit -> Current Left
+                    # connect: previous right -> measure qubit -> current left
                     combined_edges.append((prev_right_node, lr_measure_idx))
                     combined_edges.append((lr_measure_idx, curr_left_node))
 
-                    # Increment the left-right measurement index counter
+                    # increment the left-right measurement index counter
                     lr_measure_idx += 1
 
-                    
+     
     final_map = CouplingMap(combined_edges)
 
 
     return final_map, final_map.size(), n_total_per_block, global_pos
 
-
-# get leftmost node, 
-def plot_modular_cmap(cmap, pos, type):
-        plt.figure(figsize=(10, 8))
-        G = nx.Graph(list(cmap.get_edges()))
-        
-        # Draw edges
-        nx.draw_networkx_edges(G, pos, alpha=0.3, edge_color='gray')
-        
-        # Draw Data Qubits in one color, Ancillas in another
-        # (Assuming first n_data in each block are data qubits)
-        # Just a simple color split for the demo:
-        nx.draw_networkx_nodes(G, pos, node_size=30, node_color='blue')
-        
-        plt.axis('off')
-        plt.title("Modular Fault-Tolerant Architecture (Proximity Stitching)")
-        plt.savefig(f"Heavy_{type}.png")
-        plt.show()
-        
-#     modular_cmap, x, z, positions = generate_modular_layout(architecture="heavy_hex",d=5, rows=2, cols=2)
-#     plot_modular_cmap(modular_cmap, positions)

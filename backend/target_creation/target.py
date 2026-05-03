@@ -1,20 +1,23 @@
-from hardware.connectivity import k_nearest_tiled_coupling_map, generate_modular_layout
+from backend.hardware.connectivity import k_nearest_tiled_coupling_map, generate_modular_layout
 import json
 import matplotlib.pyplot as plt
 from qiskit.transpiler import Target, InstructionProperties
 import qiskit.circuit.library as qlib
 import networkx as nx
 from qiskit.transpiler import CouplingMap
+import random
 
 
 
 class FTarget(Target):
     """
     A Qiskit Target fully defined by a configuration dictionary or JSON.
-    It validates the gate set architecture upon creation.
+    It validates the gate set architecture upon creation. Topology is 
+    defined as either a custom target, a k nearest connected network, or 
+    a heavy hexagonal / heavy square surface code. 
     """
     def __init__(self, config: dict = None, **kwargs):
-        # 1. Merge the provided config with any explicit kwargs
+        # Merge the provided config with any explicit kwargs
         self.config = config or {}
         self.config.update(kwargs)
         
@@ -23,7 +26,7 @@ class FTarget(Target):
 
         self.topology = self.config.get("topology")
 
-        # 2. Extract topology parameters
+        # Extract topology parameters
         self.type = self.topology.get("type", "tiled_k_nearest")
         # topology will be a dict containing the necessary parameters to build the coupling map
 
@@ -39,7 +42,7 @@ class FTarget(Target):
             self.connector_local = self.topology.get("connector_local", 1)
 
 
-            # 2.1. Build the underlying geometry for the target using the provided topology parameters
+            # Build the underlying geometry for the target using the provided topology parameters
             self.cmap, self.total_qubits = k_nearest_tiled_coupling_map(
                 n_blocks_row=self.n_blocks_row, 
                 n_blocks_col=self.n_blocks_col,
@@ -52,7 +55,8 @@ class FTarget(Target):
             
             # number of qubits per block
             self.n_block = self.n * self.m
-        
+            
+
 
         ## todo test implementation of a custom coupling map directly 
         elif self.type == "custom_coupling_map":
@@ -68,7 +72,7 @@ class FTarget(Target):
             self.total_qubits = self.cmap.size()
             self.n_block = self.total_qubits  # Default: treat custom maps as one single block
 
-
+        
 
         elif self.type in ["heavy_hex", "heavy_square"]:
             self.n_blocks_row = self.topology.get("n_blocks_row", 2)
@@ -82,7 +86,7 @@ class FTarget(Target):
                 cols=self.n_blocks_col,
                 interconnect=self.k_inter  # Pass your connection distribution density here!
             )
-            self._is_local_edge = lambda q1, q2: (q1 // self.n_block) == (q2 // self.n_block)
+
             
             
 
@@ -90,17 +94,17 @@ class FTarget(Target):
         else:
             raise ValueError(f"Unsupported topology type: {self.type}. Supported types are 'tiled_k_nearest', 'custom_coupling_map', 'heavy_hex', and 'heavy_square'.")
 
-        # 3. UNIVERSAL LOGIC FOR LOCAL VS NETWORK EDGES
+        # Global logic for determining if an edge is local or global
         self._is_local_edge = lambda q1, q2: (q1 // self.n_block) == (q2 // self.n_block)
 
-        # 4. Validate and parse the profile from the configuration
+        # Validate and parse the profile from the configuration
         self._validate_and_parse_profile()
 
-        # 5. Initialize parent Qiskit Target
+        # Initialize parent Qiskit Target
         super().__init__()
         
-        # 6. Populate Target with the dynamically loaded gates
-        self._populate_instructions()
+        # Populate Target with the dynamically loaded gates
+        self._populate_instructions_network()
 
 
 
@@ -138,15 +142,35 @@ class FTarget(Target):
         
         # Validate local vs inter-module properties
         for gate, props in self.two_q_gate_dict.items():
-            required_keys = ['local_error', 'local_duration', 'inter_error', 'inter_duration']
+            required_keys = ['local_error', 'local_duration']
             for key in required_keys:
                 if not isinstance(props.get(key), (int, float)):
                     raise ValueError(f"Two-qubit gate '{gate}' needs numeric float values for '{key}'.")
 
-        # -- 3. String to Qiskit Object Conversion --
+
+        # -- 3. Inter device Gates -- 
+        # if none was provided, default to no networking at all
+        self.inter_device_gate_dict = profile.get("inter_device_gates", {})
+        if not isinstance(self.inter_device_gate_dict, dict) or not self.inter_device_gate_dict:
+            if self.type == "tiled_k_nearest":
+                print("Warning: No inter gate dictionary was provided. No gates between computers will be allowed")
+            inter_device_gate_names = []
+        else:
+            inter_device_gate_names = list(self.inter_device_gate_dict.keys())
+            for gate, props in self.inter_device_gate_dict.items():
+                required_keys = ['inter_error', 'inter_duration']
+                for key in required_keys:
+                    if not isinstance(props.get(key), (int, float)):
+                        raise ValueError(f"Inter-device gate '{gate}' needs numeric float values for '{key}'.")
+
+
+
+        # String to Qiskit Object Conversion --
         # Store as dictionaries tying the name to the instantiated object
         self.sq_gates_objs = {name: self._instantiate_gate(name) for name in sq_gate_names}
         self.two_q_gates_objs = {name: self._instantiate_gate(name) for name in two_q_gate_names}
+        self.inter_device_objs = {name: self._instantiate_gate(name) for name in inter_device_gate_names}
+
 
 
     def _instantiate_gate(self, gate_name: str):
@@ -168,7 +192,7 @@ class FTarget(Target):
                     return gate_class(0, 0, 0)
 
 
-    def _populate_instructions(self):
+    def _populate_instructions_network(self):
         """Internal method to add specific gates and their unique error rates to the Target."""
         
         # 1. Populate Single Qubit Gates
@@ -183,30 +207,54 @@ class FTarget(Target):
             self.add_instruction(gate_obj, sq_props)
 
         # 2. Populate Two Qubit Gates
-        for gate_name, gate_obj in self.two_q_gates_objs.items():
-            gate_props = self.two_q_gate_dict[gate_name]
-            two_q_props = {}
-            
-            for q1, q2 in self.cmap.get_edges():
-                # Apply local or inter-module properties dynamically based on edge type
-                if self._is_local_edge(q1, q2):
-                    two_q_props[(q1, q2)] = InstructionProperties(
+        master_two_q_props = {name: {} for name in self.two_q_gates_objs.keys()}
+        if self.inter_device_objs:
+            master_inter_props = {name: {} for name in self.inter_device_objs.keys()}
+
+        # Loop through the edges to fill up the master dictionaries
+        for q1, q2 in self.cmap.get_edges():
+
+            if self._is_local_edge(q1, q2):
+
+                # Add this edge to the master dict for all local gates
+                for gate_name in self.two_q_gates_objs.keys():
+                    gate_props = self.two_q_gate_dict[gate_name]
+                    master_two_q_props[gate_name][(q1, q2)] = InstructionProperties(
                         error=gate_props['local_error'], 
                         duration=gate_props['local_duration']
                     )
-                else:
-                    two_q_props[(q1, q2)] = InstructionProperties(
-                        error=gate_props['inter_error'], 
-                        duration=gate_props['inter_duration']
-                    )
             
-            self.add_instruction(gate_obj, two_q_props)
+            elif self.inter_device_objs:
 
+                # Add this edge to the master dict for all inter-device gates
+                for inter_gate_name in self.inter_device_objs.keys():
+                    inter_props = self.inter_device_gate_dict[inter_gate_name]
+                    master_inter_props[inter_gate_name][(q1, q2)] = InstructionProperties(
+                        error=inter_props['inter_error'], 
+                        duration=inter_props['inter_duration']
+                    )
+
+        # 3. Now that the dictionaries are full, add each instruction to the target EXACTLY ONCE
+        for gate_name, gate_obj in self.two_q_gates_objs.items():
+            self.add_instruction(gate_obj, master_two_q_props[gate_name])
+            
+        for inter_gate_name, inter_gate_obj in self.inter_device_objs.items():
+            self.add_instruction(inter_gate_obj, master_inter_props[inter_gate_name])
+
+    def _populate_instructions_hex():
+        ## TODO implement a logic to accurately populate a heavy_hex and heavy_square
+        ## based on the code's themselves
+        pass
+            
+        
+    # allows saving a target configurations if one made one dynamically and want's to 
+    # do so
     def to_json(self, filepath: str):
         with open(filepath, 'w') as f:
             json.dump(self.config, f, indent=4)
         print(f"Target configuration saved to {filepath}")
 
+    # allows opening from json files
     @classmethod
     def from_json(cls, filepath: str):
         with open(filepath, 'r') as f:
@@ -214,8 +262,14 @@ class FTarget(Target):
         return cls(config)
     
 
+
+
     def plot(self, filename: str = None, gap: int = 3):
-        """Plots the coupling map using the structured grid layout."""
+        """Plots the coupling map using the structured grid layout
+        Inter-connected devices are made to be the same color, with links 
+        between devices being colored for easy identification"""
+
+        # local dictionary for plotting
         pos = {}
 
         # 1. Fetch or generate the coordinate positions
@@ -233,6 +287,8 @@ class FTarget(Target):
                 pos[qubit_id] = [x, y]
                 
         elif self.type in ["heavy_hex", "heavy_square"]:
+            # saved computation from drawing graph when I was debugging,
+            # so it's kept in the logic of implementing the grid layout
             pos = self.pos  
             
         else:
@@ -264,7 +320,7 @@ class FTarget(Target):
                 br_v = block_v // self.n_blocks_col
                 bc_v = block_v % self.n_blocks_col
                 
-                # Calculate distance using your Chebyshev (max ray) logic
+                # Calculate distance using Chebyshev (max ray) logic
                 dist = max(abs(br_u - br_v), abs(bc_u - bc_v))
                 
                 # Group the edge into the dictionary based on its distance
@@ -282,12 +338,32 @@ class FTarget(Target):
             plt.figure(figsize=(12, 12))
 
         # 5. Layered Drawing Process
-        # Draw Nodes
+        block_colors = {}
+        node_color_list = []
+        
+        # Use a vibrant continuous colormap to pick random colors from
+        node_cmap = plt.get_cmap("rainbow") 
+
+        for node in G.nodes():
+            # Safely determine block ID (fallback to 0 if n_block doesn't exist for heavy_hex)
+            if hasattr(self, 'n_block') and self.n_block > 0:
+                block_id = node // self.n_block
+            else:
+                block_id = 0 
+                
+            # If this block doesn't have a color yet, assign it a random one!
+            if block_id not in block_colors:
+                # random.random() picks a random float between 0.0 and 1.0
+                block_colors[block_id] = node_cmap(random.random())
+                
+            node_color_list.append(block_colors[block_id])
+
+        # Draw Nodes with the generated list of colors
         nx.draw_networkx_nodes(
             G, 
             pos=pos, 
             node_size=100, 
-            node_color="#3498DB"
+            node_color=node_color_list # <--- Pass the color list here!
         )
         
         # Draw Local Edges (Straight, Gray)

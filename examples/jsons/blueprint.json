@@ -1,0 +1,46 @@
+{ 
+  "topology": {
+          "type": "tiled_k_nearest",
+          "n_blocks_row": 4,
+          "n_blocks_col": 4,
+          "n" : 5,
+          "m": 5,
+          "k_intra":2,
+          "k_inter": 4
+  },
+
+  "profile": {
+    "sq_gates": {
+      "single qubit gate 1": {
+          "error": 1, 
+          "duration": 1
+      },
+      "single qubit gate 2": {
+          "error": 1, 
+          "duration": 1
+      }
+    },
+
+    "two_q_gates": {
+      "two qubit gate 1": {
+          "local_error": 1, 
+          "local_duration": 1
+      },
+      "two qubit gate 2": {
+          "local_error": 1, 
+          "local_duration": 1
+      }
+    },
+    
+    "inter_device_gates": {
+      "inter device gate 1": {
+          "inter_error": 1, 
+          "inter_duration": 1
+      },
+      "inter device gate 2": {
+          "inter_error": 1, 
+          "inter_duration": 1
+      }
+    }
+  }
+}
