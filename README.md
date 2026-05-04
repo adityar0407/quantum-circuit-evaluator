@@ -43,6 +43,3 @@ To install and run this project locally, we recommend using a Python virtual env
 ## Quick Start
 
 Checkout the Demo in examples/01_Target_creation.ipynb to learn how to make your own target and compile it with a circuit! You can use the blueprint.json file to fill in your own gates and test your own circuit as well
-
-## to add on the final paper:
-Assumptions: in the example, the assumption for magic state cultivation
