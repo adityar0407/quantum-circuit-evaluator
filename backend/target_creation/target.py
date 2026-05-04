@@ -5,6 +5,7 @@ from qiskit.transpiler import Target, InstructionProperties
 import qiskit.circuit.library as qlib
 import networkx as nx
 from qiskit.transpiler import CouplingMap
+from qiskit.circuit import Parameter, Delay
 import random
 
 
@@ -184,62 +185,81 @@ class FTarget(Target):
             return gate_class()
         except TypeError:
             try:
-                return gate_class(0)
+                return gate_class(Parameter('theta'))
             except TypeError:
                 try:
-                    return gate_class(0, 0)
+                    return gate_class(Parameter('theta'), Parameter('phi'))
                 except TypeError:
-                    return gate_class(0, 0, 0)
+                    return gate_class(Parameter('theta'), Parameter('phi'), Parameter('lam'))
 
 
     def _populate_instructions_network(self):
         """Internal method to add specific gates and their unique error rates to the Target."""
         
+        # ==========================================
         # 1. Populate Single Qubit Gates
+        # ==========================================
         for gate_name, gate_obj in self.sq_gates_objs.items():
-            # Fetch the specific dictionary for this gate
             gate_props = self.sq_gate_dict[gate_name]
-            
             sq_props = {
                 (q,): InstructionProperties(error=gate_props['error'], duration=gate_props['duration']) 
                 for q in range(self.total_qubits)
             }
             self.add_instruction(gate_obj, sq_props)
 
-        # 2. Populate Two Qubit Gates
-        master_two_q_props = {name: {} for name in self.two_q_gates_objs.keys()}
-        if self.inter_device_objs:
-            master_inter_props = {name: {} for name in self.inter_device_objs.keys()}
+        # ==========================================
+        # 2. Build Unified Two-Qubit Properties
+        # ==========================================
+        unified_two_q_props = {}
+        unified_gate_objs = {}
+        
+        # Initialize dictionaries for local gates
+        for gate_name, gate_obj in self.two_q_gates_objs.items():
+            unified_two_q_props[gate_name] = {}
+            unified_gate_objs[gate_name] = gate_obj
+            
+        # Initialize dictionaries for inter-device gates (if they aren't already there)
+        for gate_name, gate_obj in self.inter_device_objs.items():
+            if gate_name not in unified_two_q_props:
+                unified_two_q_props[gate_name] = {}
+                unified_gate_objs[gate_name] = gate_obj
 
-        # Loop through the edges to fill up the master dictionaries
+        # Loop through ALL edges and funnel them into the unified dictionary
         for q1, q2 in self.cmap.get_edges():
-
             if self._is_local_edge(q1, q2):
-
-                # Add this edge to the master dict for all local gates
                 for gate_name in self.two_q_gates_objs.keys():
                     gate_props = self.two_q_gate_dict[gate_name]
-                    master_two_q_props[gate_name][(q1, q2)] = InstructionProperties(
+                    unified_two_q_props[gate_name][(q1, q2)] = InstructionProperties(
                         error=gate_props['local_error'], 
                         duration=gate_props['local_duration']
                     )
-            
             elif self.inter_device_objs:
-
-                # Add this edge to the master dict for all inter-device gates
                 for inter_gate_name in self.inter_device_objs.keys():
                     inter_props = self.inter_device_gate_dict[inter_gate_name]
-                    master_inter_props[inter_gate_name][(q1, q2)] = InstructionProperties(
+                    unified_two_q_props[inter_gate_name][(q1, q2)] = InstructionProperties(
                         error=inter_props['inter_error'], 
                         duration=inter_props['inter_duration']
                     )
 
-        # 3. Now that the dictionaries are full, add each instruction to the target EXACTLY ONCE
-        for gate_name, gate_obj in self.two_q_gates_objs.items():
-            self.add_instruction(gate_obj, master_two_q_props[gate_name])
-            
-        for inter_gate_name, inter_gate_obj in self.inter_device_objs.items():
-            self.add_instruction(inter_gate_obj, master_inter_props[inter_gate_name])
+        # ==========================================
+        # 3. Add Instructions EXACTLY Once
+        # ==========================================
+        for gate_name, gate_obj in unified_gate_objs.items():
+            edge_dict = unified_two_q_props[gate_name]
+            if len(edge_dict) > 0:
+                self.add_instruction(gate_obj, edge_dict)
+            else:
+                print(f"Notice: '{gate_name}' was provided but skipped because no valid edges exist.")
+
+        # # ==========================================
+        # # 4. Automatic Delay Injection
+        # # ==========================================
+        # delay_obj = Delay(Parameter("t"))
+        # delay_props = {(q,): None for q in range(self.total_qubits)}
+        # self.add_instruction(delay_obj, delay_props)
+
+
+
 
     def _populate_instructions_hex():
         ## TODO implement a logic to accurately populate a heavy_hex and heavy_square
