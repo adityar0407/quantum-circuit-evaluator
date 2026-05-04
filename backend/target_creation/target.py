@@ -18,6 +18,8 @@ class FTarget(Target):
     a heavy hexagonal / heavy square surface code. 
     """
     def __init__(self, config: dict = None, **kwargs):
+
+
         # Merge the provided config with any explicit kwargs
         self.config = config or {}
         self.config.update(kwargs)
@@ -32,6 +34,7 @@ class FTarget(Target):
         # topology will be a dict containing the necessary parameters to build the coupling map
 
         if self.type == "tiled_k_nearest":
+            # defaults to constructing a 2x2 computer with 100 qubits each. 
             self.n_blocks_row = self.topology.get("n_blocks_row", 2)
             self.n_blocks_col = self.topology.get("n_blocks_col", 2)
             self.n = self.topology.get("n", 10)
@@ -59,7 +62,7 @@ class FTarget(Target):
             
 
 
-        ## todo test implementation of a custom coupling map directly 
+        ## 
         elif self.type == "custom_coupling_map":
             raw_cmap = self.topology.get("coupling_map", [])
             # Fixed the isinstance syntax
@@ -79,7 +82,7 @@ class FTarget(Target):
             self.n_blocks_row = self.topology.get("n_blocks_row", 2)
             self.n_blocks_col = self.topology.get("n_blocks_col", 2)
             self.k_inter = self.topology.get("k_inter", 1)
-            self.d = self.topology.get("d", 5)  # Number of data qubits per side in the base block
+            self.d = self.topology.get("d", 5)  # The distance of the generated heavy_hex or heavy_square
             self.cmap, self.total_qubits, self.n_block, self.pos = generate_modular_layout(
                 architecture=self.type,
                 d=self.topology.get("d", 5),
@@ -95,7 +98,7 @@ class FTarget(Target):
         else:
             raise ValueError(f"Unsupported topology type: {self.type}. Supported types are 'tiled_k_nearest', 'custom_coupling_map', 'heavy_hex', and 'heavy_square'.")
 
-        # Global logic for determining if an edge is local or global
+        # Global logic for determining if an edge is local or global 
         self._is_local_edge = lambda q1, q2: (q1 // self.n_block) == (q2 // self.n_block)
 
         # Validate and parse the profile from the configuration
@@ -166,7 +169,7 @@ class FTarget(Target):
 
 
 
-        # String to Qiskit Object Conversion --
+        # String to Qiskit Object Conversion 
         # Store as dictionaries tying the name to the instantiated object
         self.sq_gates_objs = {name: self._instantiate_gate(name) for name in sq_gate_names}
         self.two_q_gates_objs = {name: self._instantiate_gate(name) for name in two_q_gate_names}
@@ -196,9 +199,8 @@ class FTarget(Target):
     def _populate_instructions_network(self):
         """Internal method to add specific gates and their unique error rates to the Target."""
         
-        # ==========================================
         # 1. Populate Single Qubit Gates
-        # ==========================================
+
         for gate_name, gate_obj in self.sq_gates_objs.items():
             gate_props = self.sq_gate_dict[gate_name]
             sq_props = {
@@ -207,9 +209,7 @@ class FTarget(Target):
             }
             self.add_instruction(gate_obj, sq_props)
 
-        # ==========================================
         # 2. Build Unified Two-Qubit Properties
-        # ==========================================
         unified_two_q_props = {}
         unified_gate_objs = {}
         
@@ -241,9 +241,7 @@ class FTarget(Target):
                         duration=inter_props['inter_duration']
                     )
 
-        # ==========================================
-        # 3. Add Instructions EXACTLY Once
-        # ==========================================
+        # 3. Add Instructions 
         for gate_name, gate_obj in unified_gate_objs.items():
             edge_dict = unified_two_q_props[gate_name]
             if len(edge_dict) > 0:
@@ -251,12 +249,7 @@ class FTarget(Target):
             else:
                 print(f"Notice: '{gate_name}' was provided but skipped because no valid edges exist.")
 
-        # # ==========================================
-        # # 4. Automatic Delay Injection
-        # # ==========================================
-        # delay_obj = Delay(Parameter("t"))
-        # delay_props = {(q,): None for q in range(self.total_qubits)}
-        # self.add_instruction(delay_obj, delay_props)
+        
 
 
 
@@ -267,8 +260,7 @@ class FTarget(Target):
         pass
             
         
-    # allows saving a target configurations if one made one dynamically and want's to 
-    # do so
+    # allows saving a target configurations if one made one dynamically 
     def to_json(self, filepath: str):
         with open(filepath, 'w') as f:
             json.dump(self.config, f, indent=4)
@@ -320,9 +312,7 @@ class FTarget(Target):
         G.add_nodes_from(range(self.total_qubits))
         G.add_edges_from(self.cmap.get_edges())
 
-        # ==========================================
         # 3. Group Edges by Distance
-        # ==========================================
         local_edges = []
         inter_edges_by_dist = {}  # Dictionary to group long-range edges by distance
         
@@ -383,7 +373,7 @@ class FTarget(Target):
             G, 
             pos=pos, 
             node_size=100, 
-            node_color=node_color_list # <--- Pass the color list here!
+            node_color=node_color_list 
         )
         
         # Draw Local Edges (Straight, Gray)
@@ -395,17 +385,15 @@ class FTarget(Target):
             arrows=False
         )
         
-        # ==========================================
         # Draw Inter-block Edges in Batches
-        # ==========================================
-        # Grab a discrete categorical colormap (tab10 gives 10 highly distinct colors)
+        # Grab a discrete categorical colormap 
         cmap = plt.get_cmap("tab10") 
         
         # Sort the dictionary so we draw distance 1, then distance 2, etc.
         for dist, edges in sorted(inter_edges_by_dist.items()):
             
             # Map the distance to a specific color in the colormap
-            # (We use dist % 10 just in case k_inter > 10, to prevent index errors)
+            # (used dist % 10 just in case k_inter > 10, to prevent index errors)
             color = cmap(dist % 10)
             
             # Dynamically calculate curvature! Longer distances get taller arcs.

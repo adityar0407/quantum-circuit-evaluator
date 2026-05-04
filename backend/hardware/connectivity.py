@@ -306,7 +306,7 @@ def get_perimeter_data_qubits(d):
     two = []
     three = []
     
-    # the upper and lower are always the firsd d and last d^2-d
+    # the upper and lower are always the firsd d and last d^2-d qubits
     one.extend(list(range(0,d)))
     three.extend(list(range(data_qubit_ids - d, data_qubit_ids)))
     num = d - 1
@@ -389,7 +389,7 @@ def generate_modular_layout(architecture="heavy_hex", d=3, rows=2, cols=2, inter
     # normalize so the center is now located in the middle of the block
     local_pos = re_center(local_pos, n_total_per_block)
 
-    # orient the graph upright
+    # orient the graph upright for better tiling visibility
     local_pos = orient_by_triangle(local_pos, corners)
     
 
@@ -397,6 +397,7 @@ def generate_modular_layout(architecture="heavy_hex", d=3, rows=2, cols=2, inter
     # not guarenteed that either x is the top or bottom but 
     # doesn't change the connection logic
     X_one, Y_both, X_two = get_perimeter_data_qubits(d)
+    
     # boolean check to find the order 
     # if X_one is on top and if Y_both goes left-right
     if local_pos[X_one[0]][1] < local_pos[X_two[0]][1]:
