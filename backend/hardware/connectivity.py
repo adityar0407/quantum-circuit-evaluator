@@ -384,7 +384,10 @@ def generate_modular_layout(architecture="heavy_hex", d=3, rows=2, cols=2, inter
     # could be good to move this elsewhere but was a major challenge to get working
     
     # create the network layout of a single logical qubit
-    local_pos = nx.drawing.nx_agraph.graphviz_layout(G_base, prog='neato')
+    try:
+        local_pos = nx.drawing.nx_agraph.graphviz_layout(G_base, prog='neato')
+    except ImportError:
+        local_pos = nx.spring_layout(G_base, seed=1738)
     
     # normalize so the center is now located in the middle of the block
     local_pos = re_center(local_pos, n_total_per_block)
@@ -528,4 +531,3 @@ def generate_modular_layout(architecture="heavy_hex", d=3, rows=2, cols=2, inter
 
 
     return final_map, final_map.size(), n_total_per_block, global_pos
-

@@ -118,3 +118,5 @@ zipp==3.23.0
 pytest==9.0.3
 pylatexenc==2.10
 pygraphviz==1.14
+fastapi
+uvicorn[standard]

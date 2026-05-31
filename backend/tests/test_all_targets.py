@@ -1,7 +1,10 @@
 import unittest
 import os
+
+os.environ.setdefault("MPLBACKEND", "Agg")
+
 from qiskit.transpiler import CouplingMap
-from target_creation.target import FTarget  
+from backend.target_creation.target import FTarget
 
 class TestFTarget(unittest.TestCase):
     
@@ -9,14 +12,17 @@ class TestFTarget(unittest.TestCase):
     def setUpClass(cls):
         """Set up a base valid profile to reuse across multiple tests."""
         cls.valid_profile = {
-            "sq_gates": ["XGate", "SXGate", "RZGate"],
-            "two_q_gates": ["CXGate"],
-            "sq_err": 1e-4,
-            "sq_dur": 5e-8,
-            "intra_err": 1e-3,
-            "intra_dur": 2e-7,
-            "inter_err": 5e-2,
-            "inter_dur": 1e-6
+            "sq_gates": {
+                "XGate": {"error": 1e-4, "duration": 5e-8},
+                "SXGate": {"error": 1e-4, "duration": 5e-8},
+                "RZGate": {"error": 1e-4, "duration": 5e-8}
+            },
+            "two_q_gates": {
+                "CXGate": {"local_error": 1e-3, "local_duration": 2e-7}
+            },
+            "inter_device_gates": {
+                "SwapGate": {"inter_error": 5e-2, "inter_duration": 1e-6}
+            }
         }
         
         # Create a directory to hold the plots so they don't clutter the root folder
@@ -63,9 +69,9 @@ class TestFTarget(unittest.TestCase):
         
         target = FTarget(config)
         
-        # For d=3 Heavy Hex, Qiskit creates 19 qubits. 
-        # Two blocks should equal 38 total qubits.
-        self.assertEqual(target.total_qubits, 38, "Total qubits should equal 2 * 19 for two d=3 heavy hex blocks.")
+        # For d=3 Heavy Hex, Qiskit creates 19 base qubits per block.
+        # The modular layout adds 3 intermediary connection qubits between two vertical blocks.
+        self.assertEqual(target.total_qubits, 41, "Total qubits should include base blocks plus connector qubits.")
         
         plot_path = os.path.join(self.plot_dir, "heavy_hex_network.png")
         target.plot(filename=plot_path)
@@ -129,7 +135,9 @@ class TestFTarget(unittest.TestCase):
     def test_missing_error_metric(self):
         """Asserts the class catches missing required physical metrics."""
         bad_profile = self.valid_profile.copy()
-        del bad_profile["intra_err"]  # Remove a required key
+        bad_profile["two_q_gates"] = {
+            "CXGate": {"local_duration": 2e-7}
+        }
         
         config = {
             "topology": {"type": "heavy_hex", "d": 3},
@@ -141,7 +149,10 @@ class TestFTarget(unittest.TestCase):
     def test_invalid_gate_name(self):
         """Asserts the class catches a gate name that doesn't exist in Qiskit."""
         bad_profile = self.valid_profile.copy()
-        bad_profile["sq_gates"] = ["XGate", "MagicNonExistentGate"]
+        bad_profile["sq_gates"] = {
+            "XGate": {"error": 1e-4, "duration": 5e-8},
+            "MagicNonExistentGate": {"error": 1e-4, "duration": 5e-8}
+        }
         
         config = {
             "topology": {"type": "heavy_hex", "d": 3},

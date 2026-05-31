@@ -28,10 +28,15 @@ class FTarget(Target):
         
 
         self.topology = self.config.get("topology")
+        if not isinstance(self.topology, dict):
+            raise ValueError("Configuration must contain a 'topology' dictionary.")
 
         # Extract topology parameters
         self.type = self.topology.get("type", "tiled_k_nearest")
         # topology will be a dict containing the necessary parameters to build the coupling map
+
+        # Validate the profile before doing expensive topology/layout work.
+        self._validate_and_parse_profile()
 
         if self.type == "tiled_k_nearest":
             # defaults to constructing a 2x2 computer with 100 qubits each. 
@@ -100,9 +105,6 @@ class FTarget(Target):
 
         # Global logic for determining if an edge is local or global 
         self._is_local_edge = lambda q1, q2: (q1 // self.n_block) == (q2 // self.n_block)
-
-        # Validate and parse the profile from the configuration
-        self._validate_and_parse_profile()
 
         # Initialize parent Qiskit Target
         super().__init__()
