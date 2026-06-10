@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -24,8 +25,8 @@ class TargetPreviewRequest(BaseModel):
 class GraphNode(BaseModel):
     id: int
     block: int
-    x: float | None = None
-    y: float | None = None
+    x: Optional[float] = None
+    y: Optional[float] = None
 
 
 class GraphEdge(BaseModel):
