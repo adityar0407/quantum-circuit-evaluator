@@ -12,7 +12,14 @@ import {
   Zap,
 } from "lucide-react";
 import { previewTarget, transpileCircuit, validateCircuit } from "./api/client";
-import type { CircuitSummary, TargetConfig, TargetPreview, TranspileResponse } from "./api/types";
+import type {
+  CircuitSummary,
+  CompilerBackend,
+  ResourceEstimator,
+  TargetConfig,
+  TargetPreview,
+  TranspileResponse,
+} from "./api/types";
 import {
   buildProfile,
   cloneModalitySettings,
@@ -26,6 +33,17 @@ import {
 
 type WorkStatus = "idle" | "loading" | "ready" | "error";
 type GateGroup = "sq_gates" | "two_q_gates" | "inter_device_gates";
+
+const compilerLabels: Record<CompilerBackend, string> = {
+  auto: "Automatic routing",
+  qiskit_ftarget: "Qiskit FTarget",
+  pandora: "Pandora",
+};
+
+const estimatorLabels: Record<ResourceEstimator, string> = {
+  simple_logical: "Logical Metrics",
+  azure_qre: "Azure QRE",
+};
 
 const topologyLabels: Record<string, string> = {
   tiled_k_nearest: "Distributed Logical Tile",
@@ -277,6 +295,8 @@ export function App() {
   const [qasm, setQasm] = useState(defaultQasm);
   const [targetConfig, setTargetConfig] = useState<TargetConfig>(defaultTargetConfig);
   const [selectedModality, setSelectedModality] = useState<ModalityKey>(defaultModality);
+  const compilerBackend: CompilerBackend = "auto";
+  const [resourceEstimator, setResourceEstimator] = useState<ResourceEstimator>("simple_logical");
   const [modalitySettings, setModalitySettings] = useState<ModalitySettings>(() =>
     cloneModalitySettings(defaultModality),
   );
@@ -351,16 +371,16 @@ export function App() {
 
   async function handleRun() {
     setStatus("loading");
-    setMessage("Running transpilation");
+    setMessage("Running compilation");
     try {
-      const result = await transpileCircuit(qasm, targetConfig);
+      const result = await transpileCircuit(qasm, targetConfig, compilerBackend, resourceEstimator);
       setCircuitSummary(result.original);
       setRunResult(result);
       setStatus("ready");
       setMessage("Run complete");
     } catch (error) {
       setStatus("error");
-      setMessage(error instanceof Error ? error.message : "Transpilation failed");
+      setMessage(error instanceof Error ? error.message : "Compilation failed");
     }
   }
 
@@ -368,6 +388,7 @@ export function App() {
     setQasm(defaultQasm);
     setTargetConfig(cloneConfig(defaultTargetConfig));
     setSelectedModality(defaultModality);
+    setResourceEstimator("simple_logical");
     setModalitySettings(cloneModalitySettings(defaultModality));
     setCircuitSummary(undefined);
     setTargetPreview(undefined);
@@ -473,6 +494,26 @@ export function App() {
                 ))}
               </select>
             </label>
+            <div className="field static-field">
+              <span>Compiler route</span>
+              <strong>Automatic</strong>
+            </div>
+            <label className="field">
+              <span>Estimator</span>
+              <select
+                value={resourceEstimator}
+                onChange={(event) => {
+                  setResourceEstimator(event.target.value as ResourceEstimator);
+                  setRunResult(undefined);
+                }}
+              >
+                {Object.entries(estimatorLabels).map(([key, label]) => (
+                  <option key={key} value={key}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
             <NumericField
               label="Block rows"
               value={asNumber(topology.n_blocks_row, 1)}
@@ -573,22 +614,26 @@ export function App() {
           <div className="panel-heading">
             <div>
               <p>Results</p>
-              <h2>Transpilation metrics</h2>
+              <h2>Compilation metrics</h2>
             </div>
             <button type="button" onClick={handleRun} disabled={status === "loading"}>
               <Play aria-hidden="true" /> Run
             </button>
           </div>
           <div className="results-grid">
+            <Metric label="Compiler" value={runResult ? compilerLabels[runResult.compiler as CompilerBackend] ?? runResult.compiler : "-"} />
+            <Metric label="Route" value={runResult?.artifacts.routing_mode ?? "-"} />
+            <Metric label="Estimator" value={runResult ? estimatorLabels[runResult.resource_estimator as ResourceEstimator] ?? runResult.resource_estimator : "-"} />
             <Metric label="Original depth" value={runResult?.original.depth ?? "-"} />
-            <Metric label="Transpiled depth" value={runResult?.transpiled.depth ?? "-"} />
-            <Metric label="Transpiled gates" value={runResult?.transpiled.gate_count ?? "-"} />
+            <Metric label="Compiled depth" value={runResult?.transpiled.depth ?? "-"} />
+            <Metric label="Compiled gates" value={runResult?.transpiled.gate_count ?? "-"} />
             <Metric label="Success proxy" value={runResult?.metrics.independent_error_success_proxy ?? "-"} />
             <Metric label="Duration estimate" value={runResult?.metrics.scheduled_duration_estimate_seconds ?? "-"} />
             <Metric label="2Q gates" value={runResult?.metrics.total_2q_gates ?? "-"} />
             <Metric label="Inter-block gates" value={runResult?.metrics.inter_block_gates ?? "-"} />
             <Metric label="Unsupported ops" value={runResult?.metrics.unsupported_operation_count ?? "-"} />
           </div>
+          {runResult?.warnings.length ? <div className="warning-box">{runResult.warnings.join(" ")}</div> : null}
           <OperationList counts={runResult?.transpiled.operation_counts} />
         </section>
       </section>

@@ -1,6 +1,8 @@
 # Virtual environments
 venv/
 .venv/
+.venv-pandora/
+.pandora-postgres/
 nisq_ftqc_env/
 
 # Python cache

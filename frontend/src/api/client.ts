@@ -1,5 +1,7 @@
 import type {
   CircuitSummary,
+  CompilerBackend,
+  ResourceEstimator,
   TargetConfig,
   TargetPreview,
   TranspileResponse,
@@ -38,9 +40,13 @@ export function previewTarget(config: TargetConfig): Promise<TargetPreview> {
 export function transpileCircuit(
   qasm: string,
   targetConfig: TargetConfig,
+  compilerBackend: CompilerBackend = "auto",
+  resourceEstimator: ResourceEstimator = "simple_logical",
 ): Promise<TranspileResponse> {
-  return postJson<TranspileResponse>("/runs/transpile", {
+  return postJson<TranspileResponse>("/runs/compile", {
     qasm,
     target_config: targetConfig,
+    compiler_backend: compilerBackend,
+    resource_estimator: resourceEstimator,
   });
 }

@@ -427,6 +427,18 @@ nav a:hover {
   color: #18212f;
 }
 
+.static-field strong {
+  display: flex;
+  align-items: center;
+  min-height: 38px;
+  border: 1px solid #cbd6df;
+  border-radius: 6px;
+  padding: 0 10px;
+  background: #f6f8fa;
+  color: #18212f;
+  font-size: 0.95rem;
+}
+
 .helper-text {
   margin: 12px 0 0;
   color: #65768a;
@@ -671,6 +683,16 @@ nav a:hover {
   border-color: #f1b7b7;
   background: #fff3f3;
   color: #9e2525;
+}
+
+.warning-box {
+  margin-top: 12px;
+  border: 1px solid #ead39b;
+  border-radius: 6px;
+  padding: 12px;
+  background: #fff9e8;
+  color: #735100;
+  font-weight: 700;
 }
 
 @media (max-width: 1120px) {

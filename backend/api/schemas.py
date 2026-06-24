@@ -48,9 +48,16 @@ class TargetPreviewResponse(BaseModel):
 class TranspileRequest(BaseModel):
     qasm: str = Field(..., min_length=1)
     target_config: dict[str, Any]
+    compiler_backend: str = "auto"
+    resource_estimator: str = "simple_logical"
 
 
 class TranspileResponse(BaseModel):
+    compiler: str = "auto"
+    resource_estimator: str = "simple_logical"
     original: CircuitSummaryResponse
     transpiled: CircuitSummaryResponse
+    compiled: Optional[CircuitSummaryResponse] = None
     metrics: dict[str, Any]
+    artifacts: dict[str, Any] = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list)

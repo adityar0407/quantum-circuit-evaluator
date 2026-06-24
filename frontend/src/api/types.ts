@@ -21,9 +21,16 @@ export type TargetPreview = {
   edges: Array<{ source: number; target: number; local: boolean }>;
 };
 
+export type CompilerBackend = "auto" | "qiskit_ftarget" | "pandora";
+export type ResourceEstimator = "simple_logical" | "azure_qre";
+
 export type TranspileResponse = {
+  compiler: CompilerBackend | string;
+  resource_estimator: ResourceEstimator | string;
   original: CircuitSummary;
   transpiled: CircuitSummary;
+  compiled?: CircuitSummary;
   metrics: Record<string, unknown>;
+  artifacts: Record<string, unknown>;
+  warnings: string[];
 };
-

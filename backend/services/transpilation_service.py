@@ -1,45 +1,75 @@
 from __future__ import annotations
 
-from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
+from typing import Any
 
-from backend.metrics.metrics_evaluator import count_network_operations, evaluate_circuit_metrics
-from backend.services.circuit_service import circuit_from_qasm, circuit_summary
-from backend.services.target_service import build_target
+from backend.services.circuit_service import circuit_from_qasm
+from backend.services.circuit_service import circuit_summary
+from backend.services.compilers import get_compiler_backend
+from backend.services.compilers.base import CompilerError
+from backend.services.resource_estimators import get_resource_estimator
+from backend.services.resource_estimators.base import ResourceEstimatorError
+
+PANDORA_GATE_THRESHOLD = 1_000
+PANDORA_QUBIT_THRESHOLD = 50
 
 
 class TranspilationError(RuntimeError):
-    """Raised when Qiskit cannot transpile a valid circuit for a valid target."""
+    """Raised when compilation or resource estimation fails."""
 
 
-def transpile_qasm(qasm: str, target_config: dict) -> dict:
+def select_compiler_backend(qasm: str, requested_backend: str) -> tuple[str, dict[str, Any]]:
+    if requested_backend != "auto":
+        return requested_backend, {"routing_mode": "manual"}
+
     circuit = circuit_from_qasm(qasm)
-    target = build_target(target_config)
+    if circuit.size() >= PANDORA_GATE_THRESHOLD or circuit.num_qubits >= PANDORA_QUBIT_THRESHOLD:
+        selected = "pandora"
+    else:
+        selected = "qiskit_ftarget"
 
-    try:
-        pass_manager = generate_preset_pass_manager(
-            optimization_level=3,
-            target=target,
-            scheduling_method="alap",
-            seed_transpiler=1738,
-        )
-        transpiled = pass_manager.run(circuit)
-    except Exception as exc:
-        raise TranspilationError(f"Transpilation failed: {exc}") from exc
-
-    metrics = evaluate_circuit_metrics(transpiled, target)
-    metric_payload = {
-        "independent_error_success_proxy": metrics.independent_error_success_proxy,
-        "scheduled_duration_estimate_seconds": metrics.scheduled_duration_estimate_seconds,
-        "missing_error_data_count": metrics.missing_error_data_count,
-        "missing_duration_data_count": metrics.missing_duration_data_count,
-        "unsupported_operation_count": metrics.unsupported_operation_count,
+    return selected, {
+        "routing_mode": "auto",
+        "routing_policy": {
+            "pandora_gate_threshold": PANDORA_GATE_THRESHOLD,
+            "pandora_qubit_threshold": PANDORA_QUBIT_THRESHOLD,
+        },
+        "routing_input": {
+            "gate_count": circuit.size(),
+            "num_qubits": circuit.num_qubits,
+        },
+        "selected_compiler": selected,
     }
 
-    if hasattr(target, "n") and hasattr(target, "m"):
-        metric_payload.update(count_network_operations(transpiled, target.n, target.m))
+
+def compile_qasm(
+    qasm: str,
+    target_config: dict[str, Any],
+    compiler_backend: str = "auto",
+    resource_estimator: str = "simple_logical",
+) -> dict[str, Any]:
+    try:
+        selected_backend, routing_artifacts = select_compiler_backend(qasm, compiler_backend)
+        compiler = get_compiler_backend(selected_backend)
+        compilation = compiler.compile(qasm, target_config)
+        compilation.artifacts.update(routing_artifacts)
+        estimator = get_resource_estimator(resource_estimator)
+        metrics = estimator.estimate(compilation)
+    except (CompilerError, ResourceEstimatorError) as exc:
+        raise TranspilationError(str(exc)) from exc
+
+    compiled_summary = circuit_summary(compilation.compiled_circuit)
 
     return {
-        "original": circuit_summary(circuit),
-        "transpiled": circuit_summary(transpiled),
-        "metrics": metric_payload,
+        "compiler": compilation.compiler,
+        "resource_estimator": estimator.key,
+        "original": circuit_summary(compilation.original_circuit),
+        "transpiled": compiled_summary,
+        "compiled": compiled_summary,
+        "metrics": metrics,
+        "artifacts": compilation.artifacts,
+        "warnings": compilation.warnings,
     }
+
+
+def transpile_qasm(qasm: str, target_config: dict[str, Any]) -> dict[str, Any]:
+    return compile_qasm(qasm, target_config)
