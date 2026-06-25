@@ -18,12 +18,14 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
 
   if (!response.ok) {
     const detail = await response.text();
+    let parsedDetail: string | undefined;
+
     try {
       const parsed = JSON.parse(detail) as { detail?: string };
-      throw new Error(parsed.detail || `Request failed with status ${response.status}`);
-    } catch {
-      throw new Error(detail || `Request failed with status ${response.status}`);
-    }
+      parsedDetail = parsed.detail;
+    } catch {}
+
+    throw new Error(parsedDetail || detail || `Request failed with status ${response.status}`);
   }
 
   return response.json() as Promise<T>;
@@ -41,7 +43,7 @@ export function transpileCircuit(
   qasm: string,
   targetConfig: TargetConfig,
   compilerBackend: CompilerBackend = "auto",
-  resourceEstimator: ResourceEstimator = "simple_logical",
+  resourceEstimator: ResourceEstimator = "azure_qre",
 ): Promise<TranspileResponse> {
   return postJson<TranspileResponse>("/runs/compile", {
     qasm,
