@@ -11,6 +11,7 @@ from backend.services.resource_estimators.base import ResourceEstimatorError
 
 PANDORA_GATE_THRESHOLD = 1_000
 PANDORA_QUBIT_THRESHOLD = 50
+DEFAULT_RESOURCE_ESTIMATOR = "azure_qre"
 
 
 class TranspilationError(RuntimeError):
@@ -45,14 +46,15 @@ def compile_qasm(
     qasm: str,
     target_config: dict[str, Any],
     compiler_backend: str = "auto",
-    resource_estimator: str = "simple_logical",
+    resource_estimator: str = DEFAULT_RESOURCE_ESTIMATOR,
 ) -> dict[str, Any]:
     try:
         selected_backend, routing_artifacts = select_compiler_backend(qasm, compiler_backend)
         compiler = get_compiler_backend(selected_backend)
         compilation = compiler.compile(qasm, target_config)
         compilation.artifacts.update(routing_artifacts)
-        estimator = get_resource_estimator(resource_estimator)
+        normalized_estimator = _select_resource_estimator(resource_estimator)
+        estimator = get_resource_estimator(normalized_estimator)
         metrics = estimator.estimate(compilation)
     except (CompilerError, ResourceEstimatorError) as exc:
         raise TranspilationError(str(exc)) from exc
@@ -73,3 +75,10 @@ def compile_qasm(
 
 def transpile_qasm(qasm: str, target_config: dict[str, Any]) -> dict[str, Any]:
     return compile_qasm(qasm, target_config)
+
+
+def _select_resource_estimator(requested_estimator: str) -> str:
+    if requested_estimator in {"", "auto", "simple_logical", DEFAULT_RESOURCE_ESTIMATOR}:
+        return DEFAULT_RESOURCE_ESTIMATOR
+
+    return requested_estimator

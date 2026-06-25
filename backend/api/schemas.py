@@ -49,12 +49,12 @@ class TranspileRequest(BaseModel):
     qasm: str = Field(..., min_length=1)
     target_config: dict[str, Any]
     compiler_backend: str = "auto"
-    resource_estimator: str = "simple_logical"
+    resource_estimator: str = "azure_qre"
 
 
 class TranspileResponse(BaseModel):
     compiler: str = "auto"
-    resource_estimator: str = "simple_logical"
+    resource_estimator: str = "azure_qre"
     original: CircuitSummaryResponse
     transpiled: CircuitSummaryResponse
     compiled: Optional[CircuitSummaryResponse] = None

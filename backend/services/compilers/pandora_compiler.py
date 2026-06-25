@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import socket
 import subprocess
 from pathlib import Path
@@ -16,7 +17,7 @@ class PandoraCompiler:
 
     def __init__(self) -> None:
         self.repo_root = Path(__file__).resolve().parents[3]
-        self.python_path = self.repo_root / ".venv-pandora" / "bin" / "python"
+        self.python_path = self.repo_root / ".venv" / "bin" / "python"
         self.runner_path = Path(__file__).resolve().with_name("pandora_runner.py")
         self.db_config = {
             "host": "localhost",
@@ -28,7 +29,7 @@ class PandoraCompiler:
     def compile(self, qasm: str, target_config: dict[str, Any]) -> CompilationResult:
         if not self.python_path.exists():
             raise CompilerBackendUnavailable(
-                "Pandora environment was not found. Expected .venv-pandora/bin/python in the repo root."
+                "Pandora environment was not found. Expected .venv/bin/python in the repo root."
             )
 
         circuit = circuit_from_qasm(qasm)
@@ -47,6 +48,7 @@ class PandoraCompiler:
                 ),
                 capture_output=True,
                 check=True,
+                env=self._subprocess_env(),
                 text=True,
                 timeout=60,
             )
@@ -100,3 +102,16 @@ class PandoraCompiler:
         return [
             "Pandora backend performed translation/support checks only because PostgreSQL was not reachable."
         ]
+
+    def _subprocess_env(self) -> dict[str, str]:
+        runtime_dir = self.repo_root / ".tmp" / "pandora-runtime"
+        mpl_dir = runtime_dir / "matplotlib"
+        cache_dir = runtime_dir / "cache"
+        mpl_dir.mkdir(parents=True, exist_ok=True)
+        cache_dir.mkdir(parents=True, exist_ok=True)
+
+        env = os.environ.copy()
+        env.setdefault("MPLBACKEND", "Agg")
+        env["MPLCONFIGDIR"] = str(mpl_dir)
+        env["XDG_CACHE_HOME"] = str(cache_dir)
+        return env

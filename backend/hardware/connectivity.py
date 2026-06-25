@@ -3,7 +3,6 @@ from pathlib import Path
 import pandas as pd 
 from qiskit.transpiler import CouplingMap
 import networkx as nx
-import matplotlib.pyplot as plt
 import numpy as np
 
 CONNECTIVITY_MAP_DIR = Path(__file__).resolve().parents[1] / "connectivity_maps"

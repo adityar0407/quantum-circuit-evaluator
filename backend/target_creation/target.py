@@ -1,6 +1,5 @@
 from backend.hardware.connectivity import k_nearest_tiled_coupling_map, generate_modular_layout
 import json
-import matplotlib.pyplot as plt
 from qiskit.transpiler import Target, InstructionProperties
 import qiskit.circuit.library as qlib
 import networkx as nx
@@ -282,6 +281,7 @@ class FTarget(Target):
         """Plots the coupling map using the structured grid layout
         Inter-connected devices are made to be the same color, with links 
         between devices being colored for easy identification"""
+        import matplotlib.pyplot as plt
 
         # local dictionary for plotting
         pos = {}
@@ -343,10 +343,8 @@ class FTarget(Target):
         # 4. Canvas Setup
         if self.type == "tiled_k_nearest":
             aspect_ratio = (self.n_blocks_col * (self.m + gap)) / max(1, (self.n_blocks_row * (self.n + gap)))
-            import matplotlib.pyplot as plt # Ensure plt is available
             plt.figure(figsize=(10 * aspect_ratio, 10))
         else:
-            import matplotlib.pyplot as plt
             plt.figure(figsize=(12, 12))
 
         # 5. Layered Drawing Process

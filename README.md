@@ -29,8 +29,8 @@ To install and run this project locally, we recommend using a Python virtual env
     ```
 2. **Create venv**
     ```bash
-    python -m venv FTarget
-    source FTarget/bin/activate  # On Windows use: venv\Scripts\activate
+    python3 -m venv .venv
+    source .venv/bin/activate
     ```
 
 3. **Install Dependencies**
