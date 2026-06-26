@@ -1,7 +1,9 @@
 import type {
   CircuitSummary,
   CompilerBackend,
+  EstimationProfiles,
   ResourceEstimator,
+  ResourceCapabilities,
   TargetConfig,
   TargetPreview,
   TranspileResponse,
@@ -31,6 +33,14 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+async function getJson<T>(path: string): Promise<T> {
+  const response = await fetch(`${API_BASE}${path}`);
+  if (!response.ok) {
+    throw new Error(`Request failed with status ${response.status}`);
+  }
+  return response.json() as Promise<T>;
+}
+
 export function validateCircuit(qasm: string): Promise<CircuitSummary> {
   return postJson<CircuitSummary>("/circuits/validate", { qasm });
 }
@@ -43,12 +53,18 @@ export function transpileCircuit(
   qasm: string,
   targetConfig: TargetConfig,
   compilerBackend: CompilerBackend = "auto",
-  resourceEstimator: ResourceEstimator = "azure_qre",
+  resourceEstimator: ResourceEstimator = "native_qre",
+  estimationProfiles?: EstimationProfiles,
 ): Promise<TranspileResponse> {
   return postJson<TranspileResponse>("/runs/compile", {
     qasm,
     target_config: targetConfig,
     compiler_backend: compilerBackend,
     resource_estimator: resourceEstimator,
+    estimation_profiles: estimationProfiles,
   });
+}
+
+export function fetchResourceCapabilities(): Promise<ResourceCapabilities> {
+  return getJson<ResourceCapabilities>("/capabilities/resource-estimation");
 }

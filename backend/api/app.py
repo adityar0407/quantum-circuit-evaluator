@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.api.routes import circuits, runs, targets
+from backend.api.routes import capabilities, circuits, runs, targets
 
 
 app = FastAPI(title="Quantum Circuit Evaluator API")
@@ -18,6 +18,7 @@ app.add_middleware(
 app.include_router(circuits.router, prefix="/api/circuits", tags=["circuits"])
 app.include_router(targets.router, prefix="/api/targets", tags=["targets"])
 app.include_router(runs.router, prefix="/api/runs", tags=["runs"])
+app.include_router(capabilities.router, prefix="/api/capabilities", tags=["capabilities"])
 
 
 @app.get("/api/health")

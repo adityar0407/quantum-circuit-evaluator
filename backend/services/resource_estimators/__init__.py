@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-from backend.services.resource_estimators.azure_qre import AzureQreEstimator
 from backend.services.resource_estimators.base import ResourceEstimator, ResourceEstimatorError
-from backend.services.resource_estimators.simple_logical import SimpleLogicalEstimator
+from backend.services.resource_estimators.native_qre import NativeQreEstimator
+from backend.services.resource_estimators.qiskit_compatibility import QiskitCompatibilityQreEstimator
 
 
 def get_resource_estimator(key: str) -> ResourceEstimator:
     estimators: dict[str, ResourceEstimator] = {
-        SimpleLogicalEstimator.key: SimpleLogicalEstimator(),
-        AzureQreEstimator.key: AzureQreEstimator(),
+        NativeQreEstimator.key: NativeQreEstimator(),
+        QiskitCompatibilityQreEstimator.key: QiskitCompatibilityQreEstimator(),
     }
 
     try:

@@ -6,5 +6,5 @@ hardware:
 ec:
   code: "surface"
   physical_error_rate: 0.001
-  logical_error_target: 0.000000000001
+  error_budget: 0.01
   distance: 7

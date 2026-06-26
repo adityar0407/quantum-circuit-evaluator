@@ -5,6 +5,8 @@ from unittest.mock import patch
 
 from backend.services.circuit_service import circuit_from_qasm
 from backend.services.compilers.base import CompilationResult
+from backend.services.compilers.base import CompilerError
+from backend.services.compilers.pandora_compiler import PandoraCompiler
 from backend.services.transpilation_service import (
     PANDORA_GATE_THRESHOLD,
     PANDORA_QUBIT_THRESHOLD,
@@ -19,6 +21,35 @@ qreg q[2];
 h q[0];
 cx q[0],q[1];
 """
+
+UNSUPPORTED_QASM = """OPENQASM 2.0;
+include "qelib1.inc";
+qreg q[2];
+cu1(pi/2) q[0],q[1];
+"""
+
+TARGET_CONFIG = {
+    "topology": {
+        "type": "tiled_k_nearest",
+        "n_blocks_row": 1,
+        "n_blocks_col": 1,
+        "n": 2,
+        "m": 2,
+        "k_intra": 4,
+        "k_inter": 1,
+        "connector_local": 1,
+    },
+    "profile": {
+        "sq_gates": {
+            "HGate": {"logical_weight": 1, "logical_preference": 1},
+            "TGate": {"logical_weight": 2, "logical_preference": 1},
+        },
+        "two_q_gates": {
+            "CXGate": {"logical_weight": 3, "routing_preference": 2},
+        },
+        "inter_device_gates": {},
+    },
+}
 
 
 def large_gate_qasm() -> str:
@@ -96,7 +127,7 @@ class TestPandoraRouting(unittest.TestCase):
                     large_gate_qasm(),
                     target_config={},
                     compiler_backend="auto",
-                    resource_estimator="simple_logical",
+                    resource_estimator="native_qre",
                 )
 
         self.assertEqual(result["compiler"], "pandora")
@@ -104,6 +135,15 @@ class TestPandoraRouting(unittest.TestCase):
         self.assertEqual(result["artifacts"]["selected_compiler"], "pandora")
         self.assertEqual(result["metrics"]["compiled_gate_count"], PANDORA_GATE_THRESHOLD)
         compiler_lookup.assert_called_once_with("pandora")
+
+    def test_pandora_support_preflight_reports_unsupported_ops_cleanly(self) -> None:
+        compiler = PandoraCompiler()
+
+        with self.assertRaises(CompilerError) as ctx:
+            compiler.compile(UNSUPPORTED_QASM, target_config=TARGET_CONFIG)
+
+        self.assertIn("Pandora support preflight failed", str(ctx.exception))
+        self.assertIn("cu1", str(ctx.exception))
 
 
 if __name__ == "__main__":

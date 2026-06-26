@@ -43,3 +43,18 @@ To install and run this project locally, we recommend using a Python virtual env
 ## Quick Start
 
 Checkout the Demo in examples/01_Target_creation.ipynb to learn how to make your own target and compile it with a circuit! You can use the blueprint.json file to fill in your own gates and test your own circuit as well
+
+## Local App
+
+To run the frontend and backend together from the repo root:
+
+```bash
+npm run dev
+```
+
+This starts:
+
+- the FastAPI backend on `http://127.0.0.1:8000`
+- the Vite frontend on `http://127.0.0.1:4173`
+
+If either port is already in use, the launcher stops and tells you which process to clear first.

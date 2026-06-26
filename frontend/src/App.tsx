@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Activity, ArrowRight, Binary, CheckCircle2, ChevronRight, FileUp, Play, RefreshCw, RotateCcw, Settings2, Target } from "lucide-react";
-import { previewTarget, transpileCircuit, validateCircuit } from "./api/client";
+import { fetchResourceCapabilities, previewTarget, transpileCircuit, validateCircuit } from "./api/client";
 import type {
   CircuitSummary,
   CompilerBackend,
+  EstimationProfiles,
+  ResourceCapabilities,
   ResourceEstimator,
   TargetConfig,
   TargetPreview,
@@ -12,12 +14,17 @@ import type {
 import {
   buildProfile,
   cloneModalitySettings,
+  cloneEstimationProfiles,
   defaultModality,
   defaultQasm,
   defaultTargetConfig,
+  qecModelDefaultParameters,
   modalityPresets,
+  qecModelOptions,
+  qecModelParameterFields,
   type ModalityKey,
   type ModalitySettings,
+  type QecModelKey,
 } from "./state/defaults";
 
 type WorkStatus = "idle" | "loading" | "ready" | "error";
@@ -32,8 +39,8 @@ const compilerLabels: Record<CompilerBackend, string> = {
 };
 
 const estimatorLabels: Record<ResourceEstimator, string> = {
-  simple_logical: "Legacy alias",
-  azure_qre: "Azure QRE",
+  native_qre: "Native QRE",
+  qiskit_compatibility: "Qiskit compatibility",
 };
 
 const topologyLabels: Record<string, string> = {
@@ -69,6 +76,31 @@ function asStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.map(String) : [];
 }
 
+function cleanOptionalProfileFields(profile: EstimationProfiles): EstimationProfiles {
+  const cleanRecord = (record: Record<string, unknown>): Record<string, unknown> =>
+    Object.fromEntries(
+      Object.entries(record)
+        .filter(([, value]) => value !== "" && value !== undefined)
+        .map(([key, value]) => [key, cleanProfileValue(value)]),
+    );
+
+  const cleanProfileValue = (value: unknown): unknown => {
+    if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+      return cleanRecord(value as Record<string, unknown>);
+    }
+    return value;
+  };
+
+  const cleaned: EstimationProfiles = {
+    physical_hardware: cleanRecord(profile.physical_hardware),
+    qec: cleanRecord(profile.qec),
+  };
+  if (profile.network) {
+    cleaned.network = cleanRecord(profile.network);
+  }
+  return cleaned;
+}
+
 function formatNumber(value: unknown): string {
   if (value === null || value === undefined || value === "") {
     return "Unavailable";
@@ -102,6 +134,20 @@ function formatDuration(value: unknown): string {
     return `${(value / 1e3).toFixed(2)} us`;
   }
   return `${formatNumber(value)} ns`;
+}
+
+function formatRuntimeMetric(metrics: Record<string, unknown>): string {
+  if (metrics.estimated_runtime_seconds !== undefined && metrics.estimated_runtime_seconds !== null) {
+    return `${formatNumber(metrics.estimated_runtime_seconds)} s`;
+  }
+  return formatDuration(metrics.runtime);
+}
+
+function formatQecParameterValue(value: unknown): string {
+  if (value === null || value === undefined || value === "") {
+    return "QDK default";
+  }
+  return formatNumber(value);
 }
 
 function humanizeKey(key: string): string {
@@ -471,6 +517,33 @@ function NumericField({
   );
 }
 
+function AssumptionField({
+  label,
+  value,
+  step = "any",
+  min,
+  onChange,
+}: {
+  label: string;
+  value: unknown;
+  step?: string;
+  min?: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="field">
+      <span>{label}</span>
+      <input
+        type="number"
+        min={min}
+        step={step}
+        value={String(value ?? "")}
+        onChange={(event) => onChange(event.target.value)}
+      />
+    </label>
+  );
+}
+
 function GateTable({
   title,
   group,
@@ -486,10 +559,10 @@ function GateTable({
   const entries = Object.entries(gates);
   const fields =
     group === "sq_gates"
-      ? ["error", "duration"]
+      ? ["logical_weight", "logical_preference"]
       : group === "two_q_gates"
-        ? ["local_error", "local_duration"]
-        : ["inter_error", "inter_duration"];
+        ? ["logical_weight", "routing_preference"]
+        : ["logical_weight", "routing_preference"];
 
   function updateGate(gateName: string, field: string, value: number) {
     const next = cloneConfig(config);
@@ -506,7 +579,7 @@ function GateTable({
         <div className="gate-row header">
           <span>Gate</span>
           {fields.map((field) => (
-            <span key={field}>{field.replace("_", " ")}</span>
+            <span key={field}>{field.replace(/_/g, " ")}</span>
           ))}
         </div>
         {entries.map(([gateName, values]) => (
@@ -519,7 +592,7 @@ function GateTable({
                 type="number"
                 step="any"
                 min="0"
-                value={values[field]}
+                value={asNumber(values[field])}
                 onChange={(event) => updateGate(gateName, field, asNumber(event.target.value))}
               />
             ))}
@@ -602,7 +675,9 @@ export function App() {
   const [targetConfig, setTargetConfig] = useState<TargetConfig>(defaultTargetConfig);
   const [selectedModality, setSelectedModality] = useState<ModalityKey>(defaultModality);
   const compilerBackend: CompilerBackend = "auto";
-  const [resourceEstimator, setResourceEstimator] = useState<ResourceEstimator>("azure_qre");
+  const [resourceEstimator, setResourceEstimator] = useState<ResourceEstimator>("native_qre");
+  const [estimationProfiles, setEstimationProfiles] = useState<EstimationProfiles>(() => cloneEstimationProfiles());
+  const [resourceCapabilities, setResourceCapabilities] = useState<ResourceCapabilities>();
   const [modalitySettings, setModalitySettings] = useState<ModalitySettings>(() =>
     cloneModalitySettings(defaultModality),
   );
@@ -623,6 +698,23 @@ export function App() {
   const routingArtifacts = asRecord(runResult?.artifacts);
   const reportData = asRecord(metrics.report_data);
   const translationNotes = asStringArray(qreAssumptions.translation_notes);
+  const physicalProfile = estimationProfiles.physical_hardware;
+  const physicalProfileMode = String(physicalProfile.physical_profile_mode ?? "built_in");
+  const selectedHardwareModel = String(physicalProfile.qdk_hardware_model ?? "gate_based");
+  const verifiedHardwareModels = resourceCapabilities?.physical_hardware.verified_builtin_models ?? [];
+  const selectedHardwareCapability = verifiedHardwareModels.find((model) => model.key === selectedHardwareModel);
+  const customPhysicalFields = resourceCapabilities?.physical_hardware.custom_profile_fields ?? [];
+  const qecProfile = estimationProfiles.qec;
+  const networkProfile = estimationProfiles.network ?? {};
+  const selectedQecModel = String(qecProfile.qec_model_name ?? "surface_code") as QecModelKey;
+  const qecModelSource = String(qecProfile.qec_model_source ?? "azure_builtin");
+  const qecModelParameters = asRecord(qecProfile.qec_model_parameters);
+  const selectedQecParameterFields = qecModelParameterFields[selectedQecModel] ?? qecModelParameterFields.surface_code;
+  const selectedQecDefaultParameters =
+    qecModelDefaultParameters[selectedQecModel] ?? qecModelDefaultParameters.surface_code;
+  const selectedQecModelDescription =
+    qecModelOptions.find((model) => model.key === selectedQecModel)?.description ??
+    "Uses the selected QDK QEC model.";
 
   const interpretation = buildInterpretation({
     runResult,
@@ -644,6 +736,12 @@ export function App() {
     setValidateState("idle");
     setCircuitSummary(undefined);
   }, [qasm]);
+
+  useEffect(() => {
+    fetchResourceCapabilities()
+      .then(setResourceCapabilities)
+      .catch(() => setResourceCapabilities(undefined));
+  }, []);
 
   function updateTopology(key: string, value: string | number) {
     setTargetConfig((current) => ({
@@ -675,6 +773,81 @@ export function App() {
       profile: buildProfile(selectedModality, next),
     }));
     setTargetPreview(undefined);
+    setRunResult(undefined);
+  }
+
+  function updateProfileSection(section: keyof EstimationProfiles, key: string, value: unknown) {
+    setEstimationProfiles((current) => ({
+      ...current,
+      [section]: {
+        ...(current[section] ?? {}),
+        [key]: value,
+      },
+    }));
+    setRunResult(undefined);
+  }
+
+  function updateQecModelSource(value: string) {
+    setEstimationProfiles((current) => ({
+      ...current,
+      qec: {
+        ...current.qec,
+        qec_model_source: value,
+        qec_model_parameters: value === "custom" ? current.qec.qec_model_parameters ?? {} : {},
+      },
+    }));
+    setRunResult(undefined);
+  }
+
+  function updateQecModelName(value: QecModelKey) {
+    setEstimationProfiles((current) => ({
+      ...current,
+      qec: {
+        ...current.qec,
+        qec_scheme: value,
+        qec_model_name: value,
+        qec_model_parameters: {},
+      },
+    }));
+    setRunResult(undefined);
+  }
+
+  function updateQecModelParameter(key: string, value: unknown) {
+    setEstimationProfiles((current) => ({
+      ...current,
+      qec: {
+        ...current.qec,
+        qec_model_parameters: {
+          ...asRecord(current.qec.qec_model_parameters),
+          [key]: value,
+        },
+      },
+    }));
+    setRunResult(undefined);
+  }
+
+  function updatePhysicalProfileMode(value: string) {
+    setEstimationProfiles((current) => ({
+      ...current,
+      physical_hardware: {
+        ...current.physical_hardware,
+        physical_profile_mode: value,
+      },
+    }));
+    setRunResult(undefined);
+  }
+
+  function updateHardwareModel(value: string) {
+    const defaults = verifiedHardwareModels.find((model) => model.key === value)?.defaults ?? {};
+    setEstimationProfiles((current) => ({
+      ...current,
+      physical_hardware: {
+        ...current.physical_hardware,
+        ...defaults,
+        physical_profile_mode: current.physical_hardware.physical_profile_mode ?? "built_in",
+        qdk_hardware_model: value,
+      },
+    }));
     setRunResult(undefined);
   }
 
@@ -739,7 +912,13 @@ export function App() {
     setStatus("loading");
     setMessage("Running compilation and resource estimation");
     try {
-      const result = await transpileCircuit(qasm, targetConfig, compilerBackend, resourceEstimator);
+      const result = await transpileCircuit(
+        qasm,
+        targetConfig,
+        compilerBackend,
+        resourceEstimator,
+        cleanOptionalProfileFields(estimationProfiles),
+      );
       setCircuitSummary(result.original);
       setRunResult(result);
       setStatus("ready");
@@ -754,7 +933,8 @@ export function App() {
     setQasm(defaultQasm);
     setTargetConfig(cloneConfig(defaultTargetConfig));
     setSelectedModality(defaultModality);
-    setResourceEstimator("azure_qre");
+    setResourceEstimator("native_qre");
+    setEstimationProfiles(cloneEstimationProfiles());
     setModalitySettings(cloneModalitySettings(defaultModality));
     setCircuitSummary(undefined);
     setTargetPreview(undefined);
@@ -913,8 +1093,8 @@ export function App() {
                       setRunResult(undefined);
                     }}
                   >
-                    <option value="azure_qre">Azure QRE</option>
-                    <option value="simple_logical">Legacy alias</option>
+                    <option value="native_qre">Native QRE</option>
+                    <option value="qiskit_compatibility">Qiskit compatibility</option>
                   </select>
                 </label>
                 <NumericField
@@ -963,8 +1143,8 @@ export function App() {
                 <div className="inline-note">
                   <Settings2 aria-hidden="true" />
                   <p>
-                    FTarget currently describes a logical architecture profile. QRE injects a physical QEC layer
-                    when estimating downstream resources.
+                    FTarget now describes only logical architecture: topology, gate families, and routing metadata.
+                    Physical hardware and QEC assumptions are handled separately in the estimation layer.
                   </p>
                 </div>
               </div>
@@ -984,6 +1164,202 @@ export function App() {
                     onChange={(value) => updateModalitySetting(field.key, value)}
                   />
                 ))}
+              </div>
+            </article>
+
+            <article className="surface-card">
+              <SectionLabel>Fault-tolerant estimation profile</SectionLabel>
+              <p className="body-copy">
+                These assumptions feed native QRE. FTarget remains logical-only; physical errors, gate timings, and
+                network metadata are carried separately.
+              </p>
+              <div className="form-grid">
+                <AssumptionField
+                  label="QRE error budget"
+                  value={qecProfile.error_budget}
+                  min="0"
+                  onChange={(value) => updateProfileSection("qec", "error_budget", value)}
+                />
+                <label className="field">
+                  <span>QEC model source</span>
+                  <select value={qecModelSource} onChange={(event) => updateQecModelSource(event.target.value)}>
+                    <option value="azure_builtin">Azure QRE built-in</option>
+                    <option value="custom">Custom QDK parameters</option>
+                  </select>
+                </label>
+              </div>
+
+              <div className="subsection-block">
+                <h4>Physical hardware model</h4>
+                <p className="field-hint">
+                  These assumptions are mapped directly into the QDK physical qubit model used by native QRE. The
+                  result records the exact mapping and any ignored fields.
+                </p>
+                <div className="form-grid qec-model-grid">
+                  <label className="field">
+                    <span>Profile mode</span>
+                    <select value={physicalProfileMode} onChange={(event) => updatePhysicalProfileMode(event.target.value)}>
+                      <option value="built_in">Built-in verified model</option>
+                      <option value="custom">Custom profile</option>
+                    </select>
+                  </label>
+                  <label className="field">
+                    <span>QDK hardware model</span>
+                    <select value={selectedHardwareModel} onChange={(event) => updateHardwareModel(event.target.value)}>
+                      {verifiedHardwareModels.map((model) => (
+                        <option key={model.key} value={model.key}>
+                          {model.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <div className="field static-field qec-model-description">
+                    <span>Verified model</span>
+                    <strong>{selectedHardwareCapability?.description ?? "Loading backend capabilities..."}</strong>
+                  </div>
+                </div>
+                {physicalProfileMode === "custom" ? (
+                  <div className="form-grid">
+                    {customPhysicalFields.map((field) =>
+                      field.key === "physical_modality" ? (
+                        <label className="field" key={field.key}>
+                          <span>Physical modality</span>
+                          <select
+                            value={String(physicalProfile.physical_modality ?? "gate_based")}
+                            onChange={(event) => updateProfileSection("physical_hardware", "physical_modality", event.target.value)}
+                          >
+                            <option value="gate_based">Gate based</option>
+                            <option value="neutral_atom">Neutral atom</option>
+                            <option value="superconducting">Superconducting</option>
+                            <option value="trapped_ion">Trapped ion</option>
+                          </select>
+                        </label>
+                      ) : (
+                        <AssumptionField
+                          key={field.key}
+                          label={`${field.key.replace(/_/g, " ")}${field.unit ? ` (${field.unit})` : ""}`}
+                          value={physicalProfile[field.key] ?? field.default}
+                          min={field.type === "probability" || field.type === "duration" ? "0" : undefined}
+                          onChange={(value) => updateProfileSection("physical_hardware", field.key, value)}
+                        />
+                      ),
+                    )}
+                  </div>
+                ) : (
+                  <div className="qec-parameter-grid">
+                    {Object.entries(selectedHardwareCapability?.defaults ?? physicalProfile).map(([key, value]) => (
+                      <div className="qec-parameter" key={key}>
+                        <span>{key.replace(/_/g, " ")}</span>
+                        <strong>{formatQecParameterValue(value)}</strong>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="subsection-block">
+                <h4>{qecModelSource === "custom" ? "Custom QEC model parameters" : "Azure QRE QEC model"}</h4>
+                <div className="form-grid qec-model-grid">
+                  <label className="field">
+                    <span>QEC model</span>
+                    <select value={selectedQecModel} onChange={(event) => updateQecModelName(event.target.value as QecModelKey)}>
+                      {qecModelOptions.map((model) => (
+                        <option key={model.key} value={model.key}>
+                          {model.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <div className="field static-field qec-model-description">
+                    <span>Profile description</span>
+                    <strong>{selectedQecModelDescription}</strong>
+                  </div>
+                </div>
+                <p className="field-hint">
+                  {qecModelSource === "custom"
+                    ? "Custom mode parameterizes the selected QDK QEC model class before native QRE estimation."
+                    : "Built-in mode uses the selected QDK model's default constructor values. These are shown below and sent implicitly to QRE."}
+                </p>
+                {qecModelSource === "custom" ? (
+                  <div className="form-grid">
+                    {selectedQecParameterFields.map((field) =>
+                      field.type === "boolean" ? (
+                        <label className="field" key={field.key}>
+                          <span>{field.label}</span>
+                          <select
+                            value={String(qecModelParameters[field.key] ?? false)}
+                            onChange={(event) => updateQecModelParameter(field.key, event.target.value === "true")}
+                          >
+                            <option value="false">False</option>
+                            <option value="true">True</option>
+                          </select>
+                        </label>
+                      ) : (
+                        <AssumptionField
+                          key={field.key}
+                          label={field.label}
+                          value={qecModelParameters[field.key] ?? ""}
+                          min={field.min}
+                          step={field.step}
+                          onChange={(value) => updateQecModelParameter(field.key, value)}
+                        />
+                      ),
+                    )}
+                  </div>
+                ) : (
+                  <div className="qec-parameter-grid">
+                    {selectedQecParameterFields.map((field) => (
+                      <div className="qec-parameter" key={field.key}>
+                        <span>{field.label}</span>
+                        <strong>{formatQecParameterValue(selectedQecDefaultParameters[field.key])}</strong>
+                      </div>
+                    ))}
+                    <div className="inline-note qec-note">
+                      <Settings2 aria-hidden="true" />
+                      <p>Switch to custom parameters to override these values before native QRE estimation.</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="subsection-block">
+                <h4>Network metadata</h4>
+                <div className="form-grid">
+                  <label className="field">
+                    <span>Network topology</span>
+                    <select
+                      value={String(networkProfile.topology ?? "none")}
+                      onChange={(event) => updateProfileSection("network", "topology", event.target.value)}
+                    >
+                      <option value="none">None</option>
+                      <option value="distributed">Distributed</option>
+                      <option value="modular">Modular</option>
+                    </select>
+                  </label>
+                  <AssumptionField
+                    label="Remote gate time seconds"
+                    value={networkProfile.remote_gate_time}
+                    min="0"
+                    onChange={(value) => updateProfileSection("network", "remote_gate_time", value)}
+                  />
+                  <AssumptionField
+                    label="Remote gate error"
+                    value={networkProfile.remote_gate_error}
+                    min="0"
+                    onChange={(value) => updateProfileSection("network", "remote_gate_error", value)}
+                  />
+                  <AssumptionField
+                    label="Link capacity"
+                    value={networkProfile.link_capacity}
+                    min="0"
+                    step="1"
+                    onChange={(value) => updateProfileSection("network", "link_capacity", value)}
+                  />
+                </div>
+                <p className="field-hint">
+                  Remote-operation fields are carried as network metadata. Teleportation, Bell-pair generation, and
+                  retry overhead are not priced in the compatibility path yet.
+                </p>
               </div>
             </article>
 
@@ -1068,8 +1444,8 @@ export function App() {
               <div className="summary-strip">
                 <SurfaceMetric label="Compiler" value={runResult ? compilerLabels[runResult.compiler as CompilerBackend] ?? runResult.compiler : "-"} tone="signal" />
                 <SurfaceMetric label="Estimator" value={runResult ? estimatorLabels[runResult.resource_estimator as ResourceEstimator] ?? runResult.resource_estimator : "-"} tone="signal" />
-                <SurfaceMetric label="Physical qubits" value={metrics.physical_qubits ?? "-"} tone="emphasis" />
-                <SurfaceMetric label="Runtime" value={formatDuration(metrics.runtime)} tone="emphasis" />
+                <SurfaceMetric label="Physical qubits" value={metrics.physical_qubits ?? metrics.total_physical_qubits ?? "-"} tone="emphasis" />
+                <SurfaceMetric label="Runtime" value={runResult ? formatRuntimeMetric(metrics) : "-"} tone="emphasis" />
                 <SurfaceMetric label="Original depth" value={runResult?.original.depth ?? "-"} />
                 <SurfaceMetric label="Compiled depth" value={runResult?.transpiled.depth ?? "-"} />
                 <SurfaceMetric label="Compiled gates" value={runResult?.transpiled.gate_count ?? "-"} />
@@ -1166,7 +1542,7 @@ function buildInterpretation({
   }
 
   const assumption =
-    "FTarget is still being interpreted as a logical architecture profile. QRE injects a gate-based qubit model and a surface-code layer for physical estimation, so these numbers should be read as architecture-shaped estimates rather than a native network-code simulation.";
+    "FTarget is interpreted as a logical architecture profile. Native QRE consumes LogicalIR as a qdk.qre.Trace and estimates through QRE lattice-surgery transforms. Unsupported and remote operations fail explicitly.";
 
   return {
     headline,

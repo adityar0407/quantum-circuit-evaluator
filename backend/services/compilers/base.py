@@ -5,6 +5,9 @@ from typing import Any, Optional, Protocol
 
 from qiskit import QuantumCircuit
 
+from backend.models.estimation_profiles import EstimationContext
+from backend.IR.models.logical_ir import LogicalIR
+
 
 @dataclass(frozen=True)
 class CompilationResult:
@@ -12,6 +15,8 @@ class CompilationResult:
     original_circuit: QuantumCircuit
     compiled_circuit: QuantumCircuit
     target: Optional[Any] = None
+    estimation_context: Optional[EstimationContext] = None
+    logical_ir: Optional[LogicalIR] = None
     artifacts: dict[str, Any] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
 

@@ -91,6 +91,13 @@ def run_translation_mode(payload: dict) -> dict:
     circuit = QuantumCircuit.from_qasm_str(payload["qasm"])
     translator = QiskitToPandoraTranslator()
     pandora_gate_codes = []
+    unsupported_operations = sorted(
+        {
+            instruction.operation.name
+            for instruction in circuit.data
+            if instruction.operation.name not in QISKIT_TO_PANDORA
+        }
+    )
 
     for instruction in circuit.data:
         pandora_gate = translator.translate(instruction)
@@ -99,7 +106,25 @@ def run_translation_mode(payload: dict) -> dict:
     return {
         "summary": circuit_summary(circuit),
         "supported_qiskit_gates": sorted(QISKIT_TO_PANDORA.keys()),
+        "unsupported_operations": unsupported_operations,
         "pandora_gate_code_counts": dict(Counter(pandora_gate_codes)),
+        "translation_only": not payload.get("use_database", False),
+    }
+
+
+def run_support_scan_mode(payload: dict) -> dict:
+    circuit = QuantumCircuit.from_qasm_str(payload["qasm"])
+    operations = sorted({instruction.operation.name for instruction in circuit.data})
+    unsupported_operations = sorted(
+        operation_name
+        for operation_name in operations
+        if operation_name not in QISKIT_TO_PANDORA
+    )
+
+    return {
+        "operations": operations,
+        "supported_qiskit_gates": sorted(QISKIT_TO_PANDORA.keys()),
+        "unsupported_operations": unsupported_operations,
     }
 
 
@@ -107,8 +132,12 @@ def main() -> int:
     import asyncio
 
     payload = json.load(sys.stdin)
-    result = run_translation_mode(payload)
-    if payload.get("use_database"):
+    mode = payload.get("mode", "translate")
+    if mode == "support_scan":
+        result = run_support_scan_mode(payload)
+    else:
+        result = run_translation_mode(payload)
+    if mode == "translate" and payload.get("use_database"):
         result.update(asyncio.run(run_database_mode(payload)))
 
     json.dump(result, sys.stdout)

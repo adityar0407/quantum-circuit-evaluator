@@ -11,6 +11,36 @@ export type TargetConfig = {
   profile: Record<string, unknown>;
 };
 
+export type EstimationProfiles = {
+  physical_hardware: Record<string, unknown>;
+  qec: Record<string, unknown>;
+  network?: Record<string, unknown>;
+};
+
+export type ResourceCapabilities = {
+  physical_hardware: {
+    profile_modes: string[];
+    verified_builtin_models: Array<{
+      key: string;
+      label: string;
+      class: string;
+      description: string;
+      defaults: Record<string, unknown>;
+      supported_qec_models: string[];
+    }>;
+    unsupported_models: Array<Record<string, unknown>>;
+    custom_profile_fields: Array<{
+      key: string;
+      type: string;
+      unit: string | null;
+      default: unknown;
+    }>;
+    mapping_notes: string[];
+  };
+  qec_models: string[];
+  native_operations: string[];
+};
+
 export type TargetPreview = {
   topology_type: string;
   total_qubits: number;
@@ -22,7 +52,7 @@ export type TargetPreview = {
 };
 
 export type CompilerBackend = "auto" | "qiskit_ftarget" | "pandora";
-export type ResourceEstimator = "simple_logical" | "azure_qre";
+export type ResourceEstimator = "native_qre" | "qiskit_compatibility";
 
 export type TranspileResponse = {
   compiler: CompilerBackend | string;

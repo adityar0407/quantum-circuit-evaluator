@@ -132,8 +132,8 @@ class TestFTarget(unittest.TestCase):
         with self.assertRaises(ValueError):
             FTarget(config)
 
-    def test_missing_error_metric(self):
-        """Asserts the class catches missing required physical metrics."""
+    def test_missing_legacy_physical_metric_is_accepted(self):
+        """FTarget should accept legacy timing/error keys without depending on them."""
         bad_profile = self.valid_profile.copy()
         bad_profile["two_q_gates"] = {
             "CXGate": {"local_duration": 2e-7}
@@ -143,8 +143,8 @@ class TestFTarget(unittest.TestCase):
             "topology": {"type": "heavy_hex", "d": 3},
             "profile": bad_profile
         }
-        with self.assertRaises(ValueError):
-            FTarget(config)
+        target = FTarget(config)
+        self.assertTrue(target.logical_architecture_only)
 
     def test_invalid_gate_name(self):
         """Asserts the class catches a gate name that doesn't exist in Qiskit."""

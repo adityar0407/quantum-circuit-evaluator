@@ -1,128 +1,72 @@
 from __future__ import annotations
 
-from statistics import fmean
+import importlib.metadata as importlib_metadata
 from typing import Any
 import warnings
 
 from qdk.estimator import EstimatorParams
 
+from backend.IR.models.logical_ir import LogicalIR
+from backend.models.estimation_profiles import EstimationContext
 
-DEFAULT_ERROR_BUDGET = 0.001
-DEFAULT_QEC_SCHEME = "surface_code"
 
-
-def build_qre_params(target: Any) -> tuple[EstimatorParams, dict[str, Any]]:
+def build_qre_params(
+    context: EstimationContext,
+    logical_ir: LogicalIR | None = None,
+) -> tuple[EstimatorParams, dict[str, Any]]:
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", category=DeprecationWarning)
         params = EstimatorParams()
 
-    one_q_error, one_q_duration = _summarize_single_qubit_profile(target)
-    two_q_error, two_q_duration = _summarize_two_qubit_profile(target)
-    measurement_error, measurement_duration = _measurement_assumptions(
-        one_q_error=one_q_error,
-        one_q_duration=one_q_duration,
-    )
-    t_error, t_duration, used_t_defaults = _t_gate_profile(
-        target=target,
-        fallback_error=one_q_error,
-        fallback_duration=one_q_duration,
-    )
+    physical = context.physical_hardware
+    qec = context.qec
+    logical = context.logical_architecture
+    network = context.network
 
     qubit_params = params.qubit_params
     qubit_params.instruction_set = "gate-based"
-    qubit_params.one_qubit_measurement_time = _seconds_to_time_string(measurement_duration)
-    qubit_params.one_qubit_measurement_error_rate = measurement_error
-    qubit_params.one_qubit_gate_time = _seconds_to_time_string(one_q_duration)
-    qubit_params.one_qubit_gate_error_rate = one_q_error
-    qubit_params.two_qubit_gate_time = _seconds_to_time_string(two_q_duration)
-    qubit_params.two_qubit_gate_error_rate = two_q_error
-    qubit_params.t_gate_time = _seconds_to_time_string(t_duration)
-    qubit_params.t_gate_error_rate = t_error
-    qubit_params.idle_error_rate = measurement_error
+    qubit_params.one_qubit_measurement_time = _seconds_to_time_string(physical.measurement_time)
+    qubit_params.one_qubit_measurement_error_rate = physical.measurement_error_rate
+    qubit_params.one_qubit_gate_time = _seconds_to_time_string(physical.one_qubit_gate_time)
+    qubit_params.one_qubit_gate_error_rate = physical.one_qubit_gate_error_rate
+    qubit_params.two_qubit_gate_time = _seconds_to_time_string(physical.two_qubit_gate_time)
+    qubit_params.two_qubit_gate_error_rate = physical.two_qubit_gate_error_rate
+    qubit_params.t_gate_time = _seconds_to_time_string(physical.one_qubit_gate_time)
+    qubit_params.t_gate_error_rate = physical.one_qubit_gate_error_rate
+    qubit_params.idle_error_rate = physical.idle_error_rate
 
-    params.qec_scheme.name = DEFAULT_QEC_SCHEME
-    params.error_budget = DEFAULT_ERROR_BUDGET
-
-    topology_type = getattr(target, "type", "unknown")
-    sq_gate_names = sorted(getattr(target, "sq_gate_dict", {}).keys())
-    two_q_gate_names = sorted(getattr(target, "two_q_gate_dict", {}).keys())
-    inter_gate_names = sorted(getattr(target, "inter_device_gate_dict", {}).keys())
-    modality = _infer_ftarget_modality(sq_gate_names, two_q_gate_names)
+    params.qec_scheme.name = qec.qec_scheme
+    params.error_budget = qec.error_budget
 
     assumptions = {
-        "ftarget_topology_type": topology_type,
-        "ftarget_modality": modality,
-        "ftarget_single_qubit_gates": sq_gate_names,
-        "ftarget_two_qubit_gates": two_q_gate_names,
-        "ftarget_inter_device_gates": inter_gate_names,
-        "qre_error_budget": DEFAULT_ERROR_BUDGET,
-        "qre_qec_scheme": DEFAULT_QEC_SCHEME,
-        "qre_translation_model": "ftarget_logical_profile_to_gate_based_qre",
-        "measurement_error_assumption": measurement_error,
-        "measurement_duration_assumption_seconds": measurement_duration,
-        "t_gate_profile_source": "native_t_gate" if not used_t_defaults else "single_qubit_fallback",
+        "logical_architecture": logical.to_dict(),
+        "physical_hardware_profile": physical.to_dict(),
+        "qec_profile": qec.to_dict(),
+        "network_profile": network.to_dict() if network is not None else None,
+        "qre_error_budget": qec.error_budget,
+        "qre_qec_scheme": qec.qec_scheme,
+        "qre_execution_model": "qiskit_compatibility",
+        "qre_translation_model": "logical_qiskit",
+        "qdk_version": _qdk_version(),
+        "compatibility_mode_limitation": (
+            "The compatibility path materializes a Qiskit QuantumCircuit from LogicalIR and submits it through "
+            "qdk.qiskit.estimate. It is not the default estimator path."
+        ),
+        "native_qre_flow": "LogicalIR -> qdk.qre.Trace -> LatticeSurgery transform -> Trace.estimate",
+        "logical_ir_version": logical_ir.version if logical_ir is not None else None,
+        "logical_ir_compiler": logical_ir.compiler if logical_ir is not None else None,
+        "logical_ir_remote_operation_count": logical_ir.remote_operation_count if logical_ir is not None else None,
+        "logical_ir_analysis": logical_ir.metadata.get("analysis") if logical_ir is not None else None,
         "translation_notes": [
-            "FTarget is currently treated as a logical-level architecture profile.",
-            "QRE still requires a QEC scheme, so the backend injects a default surface-code model for physical estimation.",
-            "Single- and two-qubit gate timings/error rates are averaged from the FTarget profile and mapped into QRE gate-based qubit parameters.",
-            "Inter-device topology affects QRE indirectly through the compiled circuit, not through a native QRE network-topology model.",
+            "FTarget is treated as a logical architecture and routing object only.",
+            "Azure QRE physical qubit parameters are sourced from an explicit physical hardware profile, not inferred from FTarget gate metadata.",
+            "This explicit compatibility mode sends a Qiskit QuantumCircuit materialized from LogicalIR to qdk.qiskit.estimate.",
+            "Remote and inter-node operations are lowered to their base logical gate only for Azure QRE circuit submission.",
+            "Remote protocol overhead is not included in Azure QRE resource counts yet.",
         ],
     }
 
     return params, assumptions
-
-
-def _summarize_single_qubit_profile(target: Any) -> tuple[float, float]:
-    entries = [
-        gate_props
-        for gate_props in getattr(target, "sq_gate_dict", {}).values()
-        if isinstance(gate_props, dict)
-    ]
-    return _average_props(entries, "error", "duration", fallback_error=1e-3, fallback_duration=1e-8)
-
-
-def _summarize_two_qubit_profile(target: Any) -> tuple[float, float]:
-    entries = [
-        gate_props
-        for gate_props in getattr(target, "two_q_gate_dict", {}).values()
-        if isinstance(gate_props, dict)
-    ]
-    return _average_props(
-        entries,
-        "local_error",
-        "local_duration",
-        fallback_error=1e-2,
-        fallback_duration=1e-7,
-    )
-
-
-def _t_gate_profile(target: Any, fallback_error: float, fallback_duration: float) -> tuple[float, float, bool]:
-    t_props = getattr(target, "sq_gate_dict", {}).get("TGate")
-    if isinstance(t_props, dict):
-        return float(t_props["error"]), float(t_props["duration"]), False
-
-    return fallback_error, fallback_duration, True
-
-
-def _measurement_assumptions(*, one_q_error: float, one_q_duration: float) -> tuple[float, float]:
-    return max(one_q_error, 1e-6), max(one_q_duration * 2, 1e-9)
-
-
-def _average_props(
-    entries: list[dict[str, Any]],
-    error_key: str,
-    duration_key: str,
-    *,
-    fallback_error: float,
-    fallback_duration: float,
-) -> tuple[float, float]:
-    errors = [float(entry[error_key]) for entry in entries if error_key in entry]
-    durations = [float(entry[duration_key]) for entry in entries if duration_key in entry]
-
-    error = fmean(errors) if errors else fallback_error
-    duration = fmean(durations) if durations else fallback_duration
-    return error, duration
-
 
 def _seconds_to_time_string(value: float) -> str:
     if value >= 1:
@@ -134,13 +78,8 @@ def _seconds_to_time_string(value: float) -> str:
     return f"{value * 1e9:g} ns"
 
 
-def _infer_ftarget_modality(sq_gate_names: list[str], two_q_gate_names: list[str]) -> str:
-    if "TGate" in sq_gate_names:
-        return "logical_clifford_t"
-    if "CZGate" in two_q_gate_names:
-        return "neutral_atom_like"
-    if "RXXGate" in two_q_gate_names:
-        return "trapped_ion_like"
-    if "CXGate" in two_q_gate_names:
-        return "gate_based"
-    return "custom_gate_profile"
+def _qdk_version() -> str:
+    try:
+        return importlib_metadata.version("qdk")
+    except importlib_metadata.PackageNotFoundError:
+        return "unknown"

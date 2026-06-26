@@ -1,4 +1,4 @@
-import type { TargetConfig } from "../api/types";
+import type { EstimationProfiles, TargetConfig } from "../api/types";
 
 export const defaultQasm = `OPENQASM 2.0;
 include "qelib1.inc";
@@ -8,12 +8,116 @@ cx q[0],q[1];`;
 
 export type ModalityKey = "ft_logical" | "superconducting" | "neutral_atom" | "trapped_ion";
 export type ModalitySettings = Record<string, number>;
+export type QecModelKey =
+  | "surface_code"
+  | "surface_code_low_move"
+  | "three_aux"
+  | "one_dimensional_yoked_surface_code"
+  | "two_dimensional_yoked_surface_code";
 
 type ModalityField = {
   key: string;
   label: string;
   step: number;
   min?: number;
+};
+
+export type QecParameterField = {
+  key: string;
+  label: string;
+  type: "number" | "boolean";
+  step?: string;
+  min?: string;
+};
+
+export const qecModelOptions: Array<{ key: QecModelKey; label: string; description: string }> = [
+  {
+    key: "surface_code",
+    label: "SurfaceCode",
+    description: "Default QDK surface-code model.",
+  },
+  {
+    key: "surface_code_low_move",
+    label: "SurfaceCodeLowMove",
+    description: "QDK surface-code variant with lower movement overhead.",
+  },
+  {
+    key: "three_aux",
+    label: "ThreeAux",
+    description: "QDK three-auxiliary-qubit model.",
+  },
+  {
+    key: "one_dimensional_yoked_surface_code",
+    label: "OneDimensionalYokedSurfaceCode",
+    description: "QDK one-dimensional yoked surface-code model.",
+  },
+  {
+    key: "two_dimensional_yoked_surface_code",
+    label: "TwoDimensionalYokedSurfaceCode",
+    description: "QDK two-dimensional yoked surface-code model.",
+  },
+];
+
+export const qecModelParameterFields: Record<QecModelKey, QecParameterField[]> = {
+  surface_code: [
+    { key: "distance", label: "Distance", type: "number", step: "2", min: "1" },
+    { key: "crossing_prefactor", label: "Crossing prefactor", type: "number", step: "any", min: "0" },
+    { key: "error_correction_threshold", label: "EC threshold", type: "number", step: "any", min: "0" },
+    { key: "one_qubit_gate_depth", label: "1Q gate depth", type: "number", step: "1", min: "0" },
+    { key: "two_qubit_gate_depth", label: "2Q gate depth", type: "number", step: "1", min: "0" },
+    { key: "code_cycle_override", label: "Cycle override", type: "number", step: "1", min: "0" },
+    { key: "code_cycle_offset", label: "Cycle offset", type: "number", step: "1", min: "0" },
+  ],
+  surface_code_low_move: [
+    { key: "distance", label: "Distance", type: "number", step: "2", min: "1" },
+    { key: "crossing_prefactor", label: "Crossing prefactor", type: "number", step: "any", min: "0" },
+    { key: "error_correction_threshold", label: "EC threshold", type: "number", step: "any", min: "0" },
+    { key: "code_cycle_override", label: "Cycle override", type: "number", step: "1", min: "0" },
+    { key: "code_cycle_offset", label: "Cycle offset", type: "number", step: "1", min: "0" },
+  ],
+  three_aux: [
+    { key: "distance", label: "Distance", type: "number", step: "2", min: "1" },
+    { key: "single_rail", label: "Single rail", type: "boolean" },
+  ],
+  one_dimensional_yoked_surface_code: [
+    { key: "crossing_prefactor", label: "Crossing prefactor", type: "number", step: "any", min: "0" },
+    { key: "error_correction_threshold", label: "EC threshold", type: "number", step: "any", min: "0" },
+  ],
+  two_dimensional_yoked_surface_code: [
+    { key: "crossing_prefactor", label: "Crossing prefactor", type: "number", step: "any", min: "0" },
+    { key: "error_correction_threshold", label: "EC threshold", type: "number", step: "any", min: "0" },
+  ],
+};
+
+export const qecModelDefaultParameters: Record<QecModelKey, Record<string, string | number | boolean | null>> = {
+  surface_code: {
+    distance: 3,
+    crossing_prefactor: 0.03,
+    error_correction_threshold: 0.01,
+    one_qubit_gate_depth: 1,
+    two_qubit_gate_depth: 4,
+    code_cycle_override: null,
+    code_cycle_offset: 0,
+  },
+  surface_code_low_move: {
+    distance: 3,
+    crossing_prefactor: 0.03,
+    error_correction_threshold: 0.01,
+    code_cycle_override: null,
+    code_cycle_offset: 0,
+  },
+  three_aux: {
+    distance: 3,
+    single_rail: false,
+  },
+  one_dimensional_yoked_surface_code: {
+    crossing_prefactor: 0.5333333333333333,
+    error_correction_threshold: 6.4,
+  },
+  two_dimensional_yoked_surface_code: {
+    crossing_prefactor: 0.008333333333333333,
+    error_correction_threshold: 250,
+  },
 };
 
 export const modalityPresets: Record<
@@ -29,90 +133,90 @@ export const modalityPresets: Record<
     label: "Logical Clifford+T",
     description: "Abstract logical gates with explicit network-link assumptions.",
     fields: [
-      { key: "clifford_error", label: "Clifford error", step: 0.000001, min: 0 },
-      { key: "t_error", label: "T gate error", step: 0.000001, min: 0 },
-      { key: "cx_error", label: "Logical CX error", step: 0.000001, min: 0 },
-      { key: "clifford_duration", label: "Clifford duration", step: 0.000001, min: 0 },
-      { key: "t_duration", label: "T gate duration", step: 0.000001, min: 0 },
-      { key: "cx_duration", label: "Logical CX duration", step: 0.000001, min: 0 },
-      { key: "network_error", label: "Network link error", step: 0.0001, min: 0 },
-      { key: "network_duration", label: "Network link duration", step: 0.000001, min: 0 },
+      { key: "clifford_weight", label: "Clifford weight", step: 0.1, min: 0 },
+      { key: "t_weight", label: "T gate weight", step: 0.1, min: 0 },
+      { key: "cx_weight", label: "Logical CX weight", step: 0.1, min: 0 },
+      { key: "clifford_preference", label: "Clifford preference", step: 0.1, min: 0 },
+      { key: "t_preference", label: "T gate preference", step: 0.1, min: 0 },
+      { key: "cx_preference", label: "Logical CX preference", step: 0.1, min: 0 },
+      { key: "network_weight", label: "Network link weight", step: 0.1, min: 0 },
+      { key: "network_preference", label: "Network link preference", step: 0.1, min: 0 },
     ],
     defaults: {
-      clifford_error: 0.0001,
-      t_error: 0.0002,
-      cx_error: 0.001,
-      clifford_duration: 0.00001,
-      t_duration: 0.00002,
-      cx_duration: 0.000001,
-      network_error: 0.05,
-      network_duration: 0.00001,
+      clifford_weight: 1,
+      t_weight: 2,
+      cx_weight: 3,
+      clifford_preference: 1,
+      t_preference: 1.5,
+      cx_preference: 2,
+      network_weight: 5,
+      network_preference: 3,
     },
   },
   superconducting: {
     label: "Superconducting",
-    description: "IBM-style basis gates with fast local operations and slower inter-module links.",
+    description: "IBM-style logical basis with local CX operations and module-link swap support.",
     fields: [
-      { key: "rz_error", label: "RZ error", step: 0.000001, min: 0 },
-      { key: "sx_x_error", label: "SX/X error", step: 0.000001, min: 0 },
-      { key: "oneq_duration", label: "1Q duration", step: 0.00000001, min: 0 },
-      { key: "cx_error", label: "CX error", step: 0.0001, min: 0 },
-      { key: "cx_duration", label: "CX duration", step: 0.00000001, min: 0 },
-      { key: "module_link_error", label: "Module link error", step: 0.0001, min: 0 },
-      { key: "module_link_duration", label: "Module link duration", step: 0.000001, min: 0 },
+      { key: "rz_weight", label: "RZ weight", step: 0.1, min: 0 },
+      { key: "sx_x_weight", label: "SX/X weight", step: 0.1, min: 0 },
+      { key: "oneq_preference", label: "1Q preference", step: 0.1, min: 0 },
+      { key: "cx_weight", label: "CX weight", step: 0.1, min: 0 },
+      { key: "cx_preference", label: "CX preference", step: 0.1, min: 0 },
+      { key: "module_link_weight", label: "Module link weight", step: 0.1, min: 0 },
+      { key: "module_link_preference", label: "Module link preference", step: 0.1, min: 0 },
     ],
     defaults: {
-      rz_error: 0.00001,
-      sx_x_error: 0.0001,
-      oneq_duration: 0.00000005,
-      cx_error: 0.002,
-      cx_duration: 0.00000025,
-      module_link_error: 0.05,
-      module_link_duration: 0.00005,
+      rz_weight: 0.5,
+      sx_x_weight: 1,
+      oneq_preference: 1,
+      cx_weight: 3,
+      cx_preference: 2,
+      module_link_weight: 5,
+      module_link_preference: 3,
     },
   },
   neutral_atom: {
     label: "Neutral Atom",
-    description: "Rydberg/CZ-style profile with blockade-radius-inspired local connectivity assumptions.",
+    description: "Rydberg/CZ-style logical basis with transport-style inter-node links.",
     fields: [
-      { key: "rotation_error", label: "Rotation error", step: 0.000001, min: 0 },
-      { key: "rotation_duration", label: "Rotation duration", step: 0.0000001, min: 0 },
-      { key: "cz_error", label: "CZ error", step: 0.0001, min: 0 },
-      { key: "cz_duration", label: "CZ duration", step: 0.0000001, min: 0 },
+      { key: "rotation_weight", label: "Rotation weight", step: 0.1, min: 0 },
+      { key: "rotation_preference", label: "Rotation preference", step: 0.1, min: 0 },
+      { key: "cz_weight", label: "CZ weight", step: 0.1, min: 0 },
+      { key: "cz_preference", label: "CZ preference", step: 0.1, min: 0 },
       { key: "blockade_radius", label: "Blockade radius", step: 1, min: 1 },
-      { key: "shuttle_error", label: "Transport/link error", step: 0.0001, min: 0 },
-      { key: "shuttle_duration", label: "Transport/link duration", step: 0.000001, min: 0 },
+      { key: "shuttle_weight", label: "Transport/link weight", step: 0.1, min: 0 },
+      { key: "shuttle_preference", label: "Transport/link preference", step: 0.1, min: 0 },
     ],
     defaults: {
-      rotation_error: 0.00001,
-      rotation_duration: 0.000001,
-      cz_error: 0.0007,
-      cz_duration: 0.000002,
+      rotation_weight: 1,
+      rotation_preference: 1,
+      cz_weight: 3,
+      cz_preference: 2,
       blockade_radius: 2,
-      shuttle_error: 0.05,
-      shuttle_duration: 0.00005,
+      shuttle_weight: 5,
+      shuttle_preference: 3,
     },
   },
   trapped_ion: {
     label: "Trapped Ion",
-    description: "Long-range ion-chain gates with slower entangling operations.",
+    description: "Long-range ion-chain logical basis with explicit inter-module link metadata.",
     fields: [
-      { key: "rotation_error", label: "Rotation error", step: 0.000001, min: 0 },
-      { key: "rotation_duration", label: "Rotation duration", step: 0.000001, min: 0 },
-      { key: "rxx_error", label: "RXX error", step: 0.0001, min: 0 },
-      { key: "rxx_duration", label: "RXX duration", step: 0.000001, min: 0 },
+      { key: "rotation_weight", label: "Rotation weight", step: 0.1, min: 0 },
+      { key: "rotation_preference", label: "Rotation preference", step: 0.1, min: 0 },
+      { key: "rxx_weight", label: "RXX weight", step: 0.1, min: 0 },
+      { key: "rxx_preference", label: "RXX preference", step: 0.1, min: 0 },
       { key: "chain_mode_penalty", label: "Chain mode penalty", step: 0.1, min: 1 },
-      { key: "link_error", label: "Module link error", step: 0.0001, min: 0 },
-      { key: "link_duration", label: "Module link duration", step: 0.000001, min: 0 },
+      { key: "link_weight", label: "Module link weight", step: 0.1, min: 0 },
+      { key: "link_preference", label: "Module link preference", step: 0.1, min: 0 },
     ],
     defaults: {
-      rotation_error: 0.00001,
-      rotation_duration: 0.00001,
-      rxx_error: 0.0005,
-      rxx_duration: 0.0001,
+      rotation_weight: 1,
+      rotation_preference: 1,
+      rxx_weight: 3,
+      rxx_preference: 2,
       chain_mode_penalty: 1,
-      link_error: 0.05,
-      link_duration: 0.00005,
+      link_weight: 5,
+      link_preference: 3,
     },
   },
 };
@@ -127,15 +231,15 @@ export function buildProfile(modality: ModalityKey, settings: ModalitySettings):
   if (modality === "superconducting") {
     return {
       sq_gates: {
-        RZGate: { error: settings.rz_error, duration: settings.oneq_duration },
-        SXGate: { error: settings.sx_x_error, duration: settings.oneq_duration },
-        XGate: { error: settings.sx_x_error, duration: settings.oneq_duration },
+        RZGate: { logical_weight: settings.rz_weight, logical_preference: settings.oneq_preference },
+        SXGate: { logical_weight: settings.sx_x_weight, logical_preference: settings.oneq_preference },
+        XGate: { logical_weight: settings.sx_x_weight, logical_preference: settings.oneq_preference },
       },
       two_q_gates: {
-        CXGate: { local_error: settings.cx_error, local_duration: settings.cx_duration },
+        CXGate: { logical_weight: settings.cx_weight, routing_preference: settings.cx_preference },
       },
       inter_device_gates: {
-        SwapGate: { inter_error: settings.module_link_error, inter_duration: settings.module_link_duration },
+        SwapGate: { logical_weight: settings.module_link_weight, routing_preference: settings.module_link_preference },
       },
     };
   }
@@ -143,15 +247,15 @@ export function buildProfile(modality: ModalityKey, settings: ModalitySettings):
   if (modality === "neutral_atom") {
     return {
       sq_gates: {
-        RXGate: { error: settings.rotation_error, duration: settings.rotation_duration },
-        RYGate: { error: settings.rotation_error, duration: settings.rotation_duration },
-        RZGate: { error: settings.rotation_error, duration: settings.rotation_duration },
+        RXGate: { logical_weight: settings.rotation_weight, logical_preference: settings.rotation_preference },
+        RYGate: { logical_weight: settings.rotation_weight, logical_preference: settings.rotation_preference },
+        RZGate: { logical_weight: settings.rotation_weight, logical_preference: settings.rotation_preference },
       },
       two_q_gates: {
-        CZGate: { local_error: settings.cz_error, local_duration: settings.cz_duration },
+        CZGate: { logical_weight: settings.cz_weight, routing_preference: settings.cz_preference },
       },
       inter_device_gates: {
-        SwapGate: { inter_error: settings.shuttle_error, inter_duration: settings.shuttle_duration },
+        SwapGate: { logical_weight: settings.shuttle_weight, routing_preference: settings.shuttle_preference },
       },
     };
   }
@@ -159,32 +263,32 @@ export function buildProfile(modality: ModalityKey, settings: ModalitySettings):
   if (modality === "trapped_ion") {
     return {
       sq_gates: {
-        RXGate: { error: settings.rotation_error, duration: settings.rotation_duration },
-        RYGate: { error: settings.rotation_error, duration: settings.rotation_duration },
-        RZGate: { error: settings.rotation_error, duration: settings.rotation_duration },
+        RXGate: { logical_weight: settings.rotation_weight, logical_preference: settings.rotation_preference },
+        RYGate: { logical_weight: settings.rotation_weight, logical_preference: settings.rotation_preference },
+        RZGate: { logical_weight: settings.rotation_weight, logical_preference: settings.rotation_preference },
       },
       two_q_gates: {
         RXXGate: {
-          local_error: settings.rxx_error * settings.chain_mode_penalty,
-          local_duration: settings.rxx_duration,
+          logical_weight: settings.rxx_weight * settings.chain_mode_penalty,
+          routing_preference: settings.rxx_preference,
         },
       },
       inter_device_gates: {
-        SwapGate: { inter_error: settings.link_error, inter_duration: settings.link_duration },
+        SwapGate: { logical_weight: settings.link_weight, routing_preference: settings.link_preference },
       },
     };
   }
 
   return {
     sq_gates: {
-      HGate: { error: settings.clifford_error, duration: settings.clifford_duration },
-      TGate: { error: settings.t_error, duration: settings.t_duration },
+      HGate: { logical_weight: settings.clifford_weight, logical_preference: settings.clifford_preference },
+      TGate: { logical_weight: settings.t_weight, logical_preference: settings.t_preference },
     },
     two_q_gates: {
-      CXGate: { local_error: settings.cx_error, local_duration: settings.cx_duration },
+      CXGate: { logical_weight: settings.cx_weight, routing_preference: settings.cx_preference },
     },
     inter_device_gates: {
-      SwapGate: { inter_error: settings.network_error, inter_duration: settings.network_duration },
+      SwapGate: { logical_weight: settings.network_weight, routing_preference: settings.network_preference },
     },
   };
 }
@@ -202,3 +306,40 @@ export const defaultTargetConfig: TargetConfig = {
   },
   profile: buildProfile(defaultModality, cloneModalitySettings(defaultModality)),
 };
+
+export const defaultEstimationProfiles: EstimationProfiles = {
+  physical_hardware: {
+    physical_profile_mode: "built_in",
+    qdk_hardware_model: "gate_based",
+    one_qubit_gate_error_rate: 1e-4,
+    two_qubit_gate_error_rate: 1e-3,
+    measurement_error_rate: 2e-4,
+    idle_error_rate: 1e-5,
+    one_qubit_gate_time: 50e-9,
+    two_qubit_gate_time: 300e-9,
+    measurement_time: 800e-9,
+    cycle_time: 1e-6,
+    physical_modality: "gate_based",
+  },
+  qec: {
+    qec_scheme: "surface_code",
+    error_budget: 1e-2,
+    qec_model_source: "azure_builtin",
+    qec_model_name: "surface_code",
+    qec_model_parameters: {},
+  },
+  network: {
+    topology: "none",
+    remote_gate_time: "",
+    remote_gate_error: "",
+    epr_generation_time: "",
+    epr_generation_error: "",
+    communication_qubits_per_link: "",
+    link_capacity: "",
+    classical_feedforward_time: "",
+  },
+};
+
+export function cloneEstimationProfiles(): EstimationProfiles {
+  return JSON.parse(JSON.stringify(defaultEstimationProfiles)) as EstimationProfiles;
+}

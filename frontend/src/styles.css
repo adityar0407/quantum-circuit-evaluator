@@ -725,6 +725,53 @@ button svg,
   margin-top: var(--space-5);
 }
 
+.qec-model-grid {
+  margin-top: var(--space-3);
+}
+
+.qec-model-description {
+  grid-column: span 3;
+}
+
+.qec-model-description strong {
+  align-items: center;
+  line-height: 1.45;
+}
+
+.qec-parameter-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+.qec-parameter {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-app-alt);
+}
+
+.qec-parameter span {
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.qec-parameter strong {
+  color: var(--text-primary);
+  font-size: 0.95rem;
+  font-weight: 650;
+}
+
+.qec-note {
+  grid-column: 1 / -1;
+}
+
 .chip-list {
   display: flex;
   flex-wrap: wrap;
@@ -1082,8 +1129,13 @@ button svg,
   .mini-analysis-grid,
   .section-grid,
   .form-grid,
-  .gate-grid {
+  .gate-grid,
+  .qec-parameter-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .qec-model-description {
+    grid-column: span 1;
   }
 }
 
@@ -1152,7 +1204,8 @@ button svg,
   .mini-analysis-grid,
   .section-grid,
   .form-grid,
-  .gate-grid {
+  .gate-grid,
+  .qec-parameter-grid {
     grid-template-columns: 1fr;
   }
   .gate-row {

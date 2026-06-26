@@ -1,10 +1,10 @@
 from backend.hardware.connectivity import k_nearest_tiled_coupling_map, generate_modular_layout
 import json
-from qiskit.transpiler import Target, InstructionProperties
+from qiskit.transpiler import Target
 import qiskit.circuit.library as qlib
 import networkx as nx
 from qiskit.transpiler import CouplingMap
-from qiskit.circuit import Parameter, Delay
+from qiskit.circuit import Measure, Parameter, Delay
 import random
 
 
@@ -15,6 +15,10 @@ class FTarget(Target):
     It validates the gate set architecture upon creation. Topology is 
     defined as either a custom target, a k nearest connected network, or 
     a heavy hexagonal / heavy square surface code. 
+
+    FTarget is treated as a logical architecture object. Gate-property payloads
+    in the input profile are accepted for backward compatibility, but they are
+    not interpreted as physical error rates or physical gate durations here.
     """
     def __init__(self, config: dict = None, **kwargs):
 
@@ -22,6 +26,12 @@ class FTarget(Target):
         # Merge the provided config with any explicit kwargs
         self.config = config or {}
         self.config.update(kwargs)
+        self.logical_architecture_only = True
+        self.legacy_physical_metadata_fields = {
+            "sq_gates": ["error", "duration"],
+            "two_q_gates": ["local_error", "local_duration"],
+            "inter_device_gates": ["inter_error", "inter_duration"],
+        }
         
 
         
@@ -98,7 +108,7 @@ class FTarget(Target):
             
             
 
-            # need to extract the n and m per block to identify the block structure for error assignment
+            # need to extract the n and m per block to identify the block structure for logical block assignment
         else:
             raise ValueError(f"Unsupported topology type: {self.type}. Supported types are 'tiled_k_nearest', 'custom_coupling_map', 'heavy_hex', and 'heavy_square'.")
 
@@ -124,15 +134,16 @@ class FTarget(Target):
         self.sq_gate_dict = profile.get("sq_gates", {}) 
         
         if not isinstance(self.sq_gate_dict, dict) or not self.sq_gate_dict:
-            raise ValueError("Profile must include a valid dict of 'sq_gates' (e.g., {'HGate': {'error':1e-4, 'duration':1e-5}}).")
+            raise ValueError("Profile must include a valid dict of 'sq_gates' (e.g., {'HGate': {'logical_weight': 1, 'logical_preference': 1}}).")
 
         sq_gate_names = list(self.sq_gate_dict.keys())
 
 
-        # Validate numeric properties
+        # Accept legacy metadata keys for backward compatibility, but do not
+        # interpret them as physical hardware properties in FTarget.
         for gate, props in self.sq_gate_dict.items():
-            if not isinstance(props.get('error'), (int, float)) or not isinstance(props.get('duration'), (int, float)):
-                raise ValueError(f"Single-qubit gate '{gate}' needs numeric float values for 'error' and 'duration'.")
+            if not isinstance(props, dict):
+                raise ValueError(f"Single-qubit gate '{gate}' must map to a metadata dictionary.")
 
         if len(sq_gate_names) < 2:
             print("Warning: Profile has fewer than 2 single-qubit gates. This may not form a universal gate set.")
@@ -145,12 +156,9 @@ class FTarget(Target):
             
         two_q_gate_names = list(self.two_q_gate_dict.keys())
         
-        # Validate local vs inter-module properties
         for gate, props in self.two_q_gate_dict.items():
-            required_keys = ['local_error', 'local_duration']
-            for key in required_keys:
-                if not isinstance(props.get(key), (int, float)):
-                    raise ValueError(f"Two-qubit gate '{gate}' needs numeric float values for '{key}'.")
+            if not isinstance(props, dict):
+                raise ValueError(f"Two-qubit gate '{gate}' must map to a metadata dictionary.")
 
 
         # -- 3. Inter device Gates -- 
@@ -163,10 +171,8 @@ class FTarget(Target):
         else:
             inter_device_gate_names = list(self.inter_device_gate_dict.keys())
             for gate, props in self.inter_device_gate_dict.items():
-                required_keys = ['inter_error', 'inter_duration']
-                for key in required_keys:
-                    if not isinstance(props.get(key), (int, float)):
-                        raise ValueError(f"Inter-device gate '{gate}' needs numeric float values for '{key}'.")
+                if not isinstance(props, dict):
+                    raise ValueError(f"Inter-device gate '{gate}' must map to a metadata dictionary.")
 
 
 
@@ -198,17 +204,16 @@ class FTarget(Target):
 
 
     def _populate_instructions_network(self):
-        """Internal method to add specific gates and their unique error rates to the Target."""
+        """Internal method to add logical gate availability and connectivity to the Target."""
         
         # 1. Populate Single Qubit Gates
 
         for gate_name, gate_obj in self.sq_gates_objs.items():
-            gate_props = self.sq_gate_dict[gate_name]
-            sq_props = {
-                (q,): InstructionProperties(error=gate_props['error'], duration=gate_props['duration']) 
-                for q in range(self.total_qubits)
-            }
+            sq_props = {(q,): None for q in range(self.total_qubits)}
             self.add_instruction(gate_obj, sq_props)
+
+        measure_props = {(q,): None for q in range(self.total_qubits)}
+        self.add_instruction(Measure(), measure_props)
 
         # 2. Build Unified Two-Qubit Properties
         unified_two_q_props = {}
@@ -229,18 +234,10 @@ class FTarget(Target):
         for q1, q2 in self.cmap.get_edges():
             if self._is_local_edge(q1, q2):
                 for gate_name in self.two_q_gates_objs.keys():
-                    gate_props = self.two_q_gate_dict[gate_name]
-                    unified_two_q_props[gate_name][(q1, q2)] = InstructionProperties(
-                        error=gate_props['local_error'], 
-                        duration=gate_props['local_duration']
-                    )
+                    unified_two_q_props[gate_name][(q1, q2)] = None
             elif self.inter_device_objs:
                 for inter_gate_name in self.inter_device_objs.keys():
-                    inter_props = self.inter_device_gate_dict[inter_gate_name]
-                    unified_two_q_props[inter_gate_name][(q1, q2)] = InstructionProperties(
-                        error=inter_props['inter_error'], 
-                        duration=inter_props['inter_duration']
-                    )
+                    unified_two_q_props[inter_gate_name][(q1, q2)] = None
 
         # 3. Add Instructions 
         for gate_name, gate_obj in unified_gate_objs.items():

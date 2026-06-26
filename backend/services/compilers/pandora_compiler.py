@@ -4,6 +4,7 @@ import json
 import os
 import socket
 import subprocess
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +35,16 @@ class PandoraCompiler:
 
         circuit = circuit_from_qasm(qasm)
         target = build_target(target_config)
+        support_scan = self._support_scan(qasm)
+        unsupported_operations = support_scan.get("unsupported_operations", [])
+        if unsupported_operations:
+            supported = ", ".join(support_scan.get("supported_qiskit_gates", []))
+            unsupported = ", ".join(unsupported_operations)
+            raise CompilerError(
+                "Pandora support preflight failed. "
+                f"Unsupported operations: {unsupported}. "
+                f"Supported Pandora operations: {supported}"
+            )
 
         try:
             use_database = self._database_is_available()
@@ -42,6 +53,7 @@ class PandoraCompiler:
                 input=json.dumps(
                     {
                         "qasm": qasm,
+                        "mode": "translate",
                         "use_database": use_database,
                         "db_config": self.db_config,
                     }
@@ -66,6 +78,11 @@ class PandoraCompiler:
         compiled_circuit = circuit
         if artifacts.get("optimized_qasm"):
             compiled_circuit = circuit_from_qasm(artifacts["optimized_qasm"])
+        artifacts.setdefault("database_mode", bool(artifacts.get("database_enabled")))
+        artifacts.setdefault("translation_only_status", not bool(artifacts.get("database_enabled")))
+        artifacts.setdefault("rewrite_passes", artifacts.get("optimization_passes", []))
+        artifacts.setdefault("unsupported_operations", [])
+        artifacts["removed_operations"] = _removed_operations(circuit, compiled_circuit)
 
         return CompilationResult(
             compiler=self.key,
@@ -75,6 +92,33 @@ class PandoraCompiler:
             artifacts=artifacts,
             warnings=self._warnings_for_artifacts(artifacts),
         )
+
+    def _support_scan(self, qasm: str) -> dict[str, Any]:
+        try:
+            completed = subprocess.run(
+                [str(self.python_path), str(self.runner_path)],
+                input=json.dumps(
+                    {
+                        "qasm": qasm,
+                        "mode": "support_scan",
+                    }
+                ),
+                capture_output=True,
+                check=True,
+                env=self._subprocess_env(),
+                text=True,
+                timeout=30,
+            )
+        except subprocess.CalledProcessError as exc:
+            detail = exc.stderr.strip() or exc.stdout.strip() or str(exc)
+            raise CompilerError(f"Pandora support preflight failed: {detail}") from exc
+        except subprocess.TimeoutExpired as exc:
+            raise CompilerError("Pandora support preflight timed out after 30 seconds.") from exc
+
+        try:
+            return self._load_runner_json(completed.stdout)
+        except json.JSONDecodeError as exc:
+            raise CompilerError(f"Pandora support preflight returned invalid JSON: {completed.stdout}") from exc
 
     def _database_is_available(self) -> bool:
         try:
@@ -115,3 +159,10 @@ class PandoraCompiler:
         env["MPLCONFIGDIR"] = str(mpl_dir)
         env["XDG_CACHE_HOME"] = str(cache_dir)
         return env
+
+
+def _removed_operations(original_circuit, compiled_circuit) -> dict[str, int]:
+    original_counts = Counter({name: int(count) for name, count in original_circuit.count_ops().items()})
+    compiled_counts = Counter({name: int(count) for name, count in compiled_circuit.count_ops().items()})
+    removed = original_counts - compiled_counts
+    return dict(removed)

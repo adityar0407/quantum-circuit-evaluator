@@ -1,0 +1,7 @@
+{
+  "name": "quantum-circuit-evaluator",
+  "private": true,
+  "scripts": {
+    "dev": "python3 scripts/dev.py"
+  }
+}

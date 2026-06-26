@@ -16,6 +16,7 @@ def run_compilation(payload: TranspileRequest) -> TranspileResponse:
                 payload.target_config,
                 compiler_backend=payload.compiler_backend,
                 resource_estimator=payload.resource_estimator,
+                estimation_profiles=payload.estimation_profiles,
             )
         )
     except (CircuitValidationError, TargetBuildError, TranspilationError) as exc:
