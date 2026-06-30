@@ -27,10 +27,11 @@ import {
   type ModalitySettings,
   type QecModelKey,
 } from "./state/defaults";
+import { GuidePage } from "./pages/GuidePage";
 
 type WorkStatus = "idle" | "loading" | "ready" | "error";
 type GateGroup = "sq_gates" | "two_q_gates" | "inter_device_gates";
-type AppView = "landing" | "credits" | "tool";
+type AppView = "landing" | "credits" | "guide" | "tool";
 type ActionState = "idle" | "loading" | "success" | "error";
 type SupportStatus = "supported" | "approximate" | "unsupported";
 
@@ -344,6 +345,9 @@ function resolveViewFromHash(hash: string): AppView {
   if (key === "credits") {
     return "credits";
   }
+  if (key === "guide") {
+    return "guide";
+  }
   if (["tool", "circuit", "architecture", "preview", "results"].includes(key)) {
     return "tool";
   }
@@ -362,6 +366,10 @@ function goToCredits() {
   window.location.hash = "credits";
 }
 
+function goToGuide() {
+  window.location.hash = "guide";
+}
+
 function TopToolbar({ view }: { view: AppView }) {
   return (
     <header className="top-toolbar">
@@ -376,6 +384,9 @@ function TopToolbar({ view }: { view: AppView }) {
           </a>
           <a href="#credits" className={view === "credits" ? "active" : undefined}>
             Credits
+          </a>
+          <a href="#guide" className={view === "guide" ? "active" : undefined}>
+            Guide
           </a>
           <a href="#tool" className={view === "tool" ? "active" : undefined}>
             Tool
@@ -404,6 +415,9 @@ function LandingPage() {
             </button>
             <button type="button" className="secondary" onClick={goToCredits}>
               View credits
+            </button>
+            <button type="button" className="secondary" onClick={goToGuide}>
+              Open guide
             </button>
           </div>
         </div>
@@ -1135,6 +1149,15 @@ export function App() {
       <>
         <TopToolbar view={view} />
         <CreditsPage />
+      </>
+    );
+  }
+
+  if (view === "guide") {
+    return (
+      <>
+        <TopToolbar view={view} />
+        <GuidePage />
       </>
     );
   }
