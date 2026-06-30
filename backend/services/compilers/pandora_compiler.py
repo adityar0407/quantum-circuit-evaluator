@@ -8,13 +8,18 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from qiskit import qasm2
+
 from backend.services.circuit_service import circuit_from_qasm
 from backend.services.compilers.base import CompilationResult, CompilerBackendUnavailable, CompilerError
-from backend.services.target_service import build_target
+from backend.services.compilers.pandora_router import route_circuit_with_target
+from backend.services.compilers.pandora_topology import validate_compiled_circuit_against_architecture
+from backend.services.target_service import build_target, export_target_topology
 
 
 class PandoraCompiler:
     key = "pandora"
+    supported_topologies = {"tiled_k_nearest", "heavy_hex", "heavy_square"}
 
     def __init__(self) -> None:
         self.repo_root = Path(__file__).resolve().parents[3]
@@ -35,14 +40,22 @@ class PandoraCompiler:
 
         circuit = circuit_from_qasm(qasm)
         target = build_target(target_config)
-        support_scan = self._support_scan(qasm)
+        topology = export_target_topology(target)
+        self._ensure_supported_topology(topology)
+
+        legalized = route_circuit_with_target(circuit, target, topology)
+        legalized_circuit = legalized.circuit
+        legalization_artifacts = legalized.artifacts
+        legalized_qasm = qasm2.dumps(legalized_circuit)
+
+        support_scan = self._support_scan(legalized_qasm)
         unsupported_operations = support_scan.get("unsupported_operations", [])
         if unsupported_operations:
             supported = ", ".join(support_scan.get("supported_qiskit_gates", []))
             unsupported = ", ".join(unsupported_operations)
             raise CompilerError(
                 "Pandora support preflight failed. "
-                f"Unsupported operations: {unsupported}. "
+                f"Unsupported operations after topology legalization: {unsupported}. "
                 f"Supported Pandora operations: {supported}"
             )
 
@@ -52,7 +65,7 @@ class PandoraCompiler:
                 [str(self.python_path), str(self.runner_path)],
                 input=json.dumps(
                     {
-                        "qasm": qasm,
+                        "qasm": legalized_qasm,
                         "mode": "translate",
                         "use_database": use_database,
                         "db_config": self.db_config,
@@ -75,13 +88,18 @@ class PandoraCompiler:
         except json.JSONDecodeError as exc:
             raise CompilerError(f"Pandora returned invalid JSON: {completed.stdout}") from exc
 
-        compiled_circuit = circuit
+        compiled_circuit = legalized_circuit
         if artifacts.get("optimized_qasm"):
             compiled_circuit = circuit_from_qasm(artifacts["optimized_qasm"])
+        topology_validation = validate_compiled_circuit_against_architecture(compiled_circuit, topology)
         artifacts.setdefault("database_mode", bool(artifacts.get("database_enabled")))
-        artifacts.setdefault("translation_only_status", not bool(artifacts.get("database_enabled")))
         artifacts.setdefault("rewrite_passes", artifacts.get("optimization_passes", []))
         artifacts.setdefault("unsupported_operations", [])
+        artifacts["target_topology"] = topology
+        artifacts["topology_aware"] = True
+        artifacts["topology_lowering"] = legalization_artifacts
+        artifacts["topology_validation"] = topology_validation
+        artifacts["support_scan"] = support_scan
         artifacts["removed_operations"] = _removed_operations(circuit, compiled_circuit)
 
         return CompilationResult(
@@ -92,6 +110,15 @@ class PandoraCompiler:
             artifacts=artifacts,
             warnings=self._warnings_for_artifacts(artifacts),
         )
+
+    def _ensure_supported_topology(self, topology: dict[str, Any]) -> None:
+        topology_type = str(topology.get("topology_type", "unknown"))
+        if topology_type not in self.supported_topologies:
+            supported = ", ".join(sorted(self.supported_topologies))
+            raise CompilerError(
+                f"Pandora topology-aware compilation currently supports {supported}. "
+                f"Received topology type: {topology_type}"
+            )
 
     def _support_scan(self, qasm: str) -> dict[str, Any]:
         try:
@@ -139,12 +166,13 @@ class PandoraCompiler:
     def _warnings_for_artifacts(artifacts: dict[str, Any]) -> list[str]:
         if artifacts.get("database_enabled"):
             return [
-                "Pandora PostgreSQL mode loaded the circuit and ran conservative cancellation rewrites. "
-                "The optimized circuit was reconstructed into Qiskit form for downstream metrics."
+                "Pandora legalized the circuit against the selected FTarget topology, loaded it into PostgreSQL, "
+                "and ran conservative cancellation rewrites before reconstructing Qiskit output."
             ]
 
         return [
-            "Pandora backend performed translation/support checks only because PostgreSQL was not reachable."
+            "Pandora legalized the circuit against the selected FTarget topology and completed support checks, "
+            "but PostgreSQL was not reachable so database-backed rewrite passes were skipped."
         ]
 
     def _subprocess_env(self) -> dict[str, str]:

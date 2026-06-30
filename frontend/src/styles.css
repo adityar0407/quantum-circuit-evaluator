@@ -865,6 +865,33 @@ button svg,
   font-weight: 600;
 }
 
+.support-status-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: var(--radius-pill);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.support-status-chip.status-supported {
+  background: var(--info-soft);
+  color: var(--primary);
+}
+
+.support-status-chip.status-approximate {
+  background: var(--warning-soft);
+  color: var(--warning-hover);
+}
+
+.support-status-chip.status-unsupported {
+  background: rgba(145, 47, 47, 0.12);
+  color: #912f2f;
+}
+
 .insight-strip {
   margin-top: var(--space-5);
 }
@@ -1108,6 +1135,31 @@ button svg,
   font-size: 0.92rem;
   line-height: 1.55;
   overflow-wrap: anywhere;
+}
+
+.architecture-reference-list {
+  margin-top: var(--space-4);
+}
+
+.advanced-block {
+  margin-top: var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-app-alt);
+}
+
+.architecture-preview-card {
+  overflow: hidden;
+}
+
+.architecture-preview-strip {
+  margin-top: var(--space-4);
+}
+
+.architecture-preview-card .target-graph,
+.architecture-preview-card .graph-empty {
+  min-height: 300px;
 }
 
 @media (max-width: 1240px) {

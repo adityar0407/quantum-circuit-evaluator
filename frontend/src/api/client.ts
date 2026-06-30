@@ -1,4 +1,5 @@
 import type {
+  ArchitectureCapabilities,
   CircuitSummary,
   CompilerBackend,
   EstimationProfiles,
@@ -67,4 +68,8 @@ export function transpileCircuit(
 
 export function fetchResourceCapabilities(): Promise<ResourceCapabilities> {
   return getJson<ResourceCapabilities>("/capabilities/resource-estimation");
+}
+
+export function fetchArchitectureCapabilities(): Promise<ArchitectureCapabilities> {
+  return getJson<ArchitectureCapabilities>("/capabilities/architectures");
 }

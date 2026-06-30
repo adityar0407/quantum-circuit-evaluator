@@ -131,7 +131,7 @@ export const modalityPresets: Record<
 > = {
   ft_logical: {
     label: "Logical Clifford+T",
-    description: "Abstract logical gates with explicit network-link assumptions.",
+    description: "A hardware-agnostic logical gate basis for abstract fault-tolerant studies.",
     fields: [
       { key: "clifford_weight", label: "Clifford weight", step: 0.1, min: 0 },
       { key: "t_weight", label: "T gate weight", step: 0.1, min: 0 },
@@ -155,7 +155,7 @@ export const modalityPresets: Record<
   },
   superconducting: {
     label: "Superconducting",
-    description: "IBM-style logical basis with local CX operations and module-link swap support.",
+    description: "A superconducting-style gate basis with local CX interactions and optional inter-module moves.",
     fields: [
       { key: "rz_weight", label: "RZ weight", step: 0.1, min: 0 },
       { key: "sx_x_weight", label: "SX/X weight", step: 0.1, min: 0 },
@@ -177,7 +177,7 @@ export const modalityPresets: Record<
   },
   neutral_atom: {
     label: "Neutral Atom",
-    description: "Rydberg/CZ-style logical basis with transport-style inter-node links.",
+    description: "A neutral-atom style gate basis with CZ interactions and optional atom movement between regions.",
     fields: [
       { key: "rotation_weight", label: "Rotation weight", step: 0.1, min: 0 },
       { key: "rotation_preference", label: "Rotation preference", step: 0.1, min: 0 },
@@ -199,7 +199,7 @@ export const modalityPresets: Record<
   },
   trapped_ion: {
     label: "Trapped Ion",
-    description: "Long-range ion-chain logical basis with explicit inter-module link metadata.",
+    description: "An ion-style gate basis for long-range interactions and optional inter-zone or inter-module moves.",
     fields: [
       { key: "rotation_weight", label: "Rotation weight", step: 0.1, min: 0 },
       { key: "rotation_preference", label: "Rotation preference", step: 0.1, min: 0 },
@@ -294,12 +294,13 @@ export function buildProfile(modality: ModalityKey, settings: ModalitySettings):
 }
 
 export const defaultTargetConfig: TargetConfig = {
+  architecture_preset: "square_grid_surface_code",
   topology: {
     type: "tiled_k_nearest",
-    n_blocks_row: 2,
-    n_blocks_col: 2,
-    n: 3,
-    m: 3,
+    n_blocks_row: 1,
+    n_blocks_col: 1,
+    n: 7,
+    m: 7,
     k_intra: 1,
     k_inter: 1,
     connector_local: 1,

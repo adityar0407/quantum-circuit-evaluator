@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import importlib.metadata as importlib_metadata
+import math
+import re
 from typing import Any
 
 from qdk.qre.models import qec as qdk_qec_models
@@ -14,7 +16,36 @@ from backend.services.resource_estimators.base import ResourceEstimatorError
 from backend.services.resource_estimators.physical_qdk_adapter import physical_profile_to_qdk_model
 
 
-SUPPORTED_NATIVE_OPERATIONS = {"H", "CX", "MEASURE", "BARRIER"}
+SUPPORTED_NATIVE_OPERATIONS = {
+    "BARRIER",
+    "CX",
+    "H",
+    "MEASURE",
+    "RESET",
+    "RX",
+    "RY",
+    "RZ",
+    "S",
+    "SDG",
+    "T",
+    "TDG",
+    "X",
+    "Z",
+}
+NATIVE_SINGLE_QUBIT_INSTRUCTIONS = {
+    "H": instruction_ids.H,
+    "X": instruction_ids.PAULI_X,
+    "Z": instruction_ids.PAULI_Z,
+    "S": instruction_ids.S,
+    "SDG": instruction_ids.S_DAG,
+    "T": instruction_ids.T,
+    "TDG": instruction_ids.T_DAG,
+}
+NATIVE_ROTATION_INSTRUCTIONS = {
+    "RX": instruction_ids.RX,
+    "RY": instruction_ids.RY,
+    "RZ": instruction_ids.RZ,
+}
 QDK_QEC_MODELS = {
     "surface_code": qdk_qec_models.SurfaceCode,
     "surface_code_low_move": qdk_qec_models.SurfaceCodeLowMove,
@@ -118,7 +149,8 @@ class NativeQreEstimator:
                     "Native mode builds qdk.qre.Trace directly from LogicalIR.",
                     "Native mode applies qdk.qre.LatticeSurgery().transform(trace).",
                     "Native mode calls Trace.estimate(...) and does not call qdk.qiskit.estimate.",
-                    "Only H, local CX, Z-basis measurement, and explicit barrier skipping are supported in this first native adapter.",
+                    "Supported native operations are explicitly validated through Trace, LatticeSurgery transform, and Trace.estimate before being exposed.",
+                    "Reset is represented as QDK MEAS_RESET_Z because this QDK version exposes measurement-reset instructions rather than a plain reset instruction.",
                 ],
             },
         }
@@ -128,9 +160,11 @@ def logical_ir_to_native_qre_trace(logical_ir: LogicalIR) -> tuple[Trace, dict[s
     trace = Trace(logical_ir.logical_qubit_count)
     mapped_operations: list[dict[str, Any]] = []
     skipped_operations: list[dict[str, Any]] = []
+    source_operations = [operation.to_dict() for operation in logical_ir.operations]
 
     for operation in logical_ir.operations:
         base_operation = operation.base_operation.upper()
+        qre_parameters: list[float] = []
         if operation.op_kind == "two_qubit_remote":
             raise ResourceEstimatorError(
                 f"Native QRE does not support remote operation {operation.operation} at {operation.op_id}. "
@@ -139,12 +173,21 @@ def logical_ir_to_native_qre_trace(logical_ir: LogicalIR) -> tuple[Trace, dict[s
         if base_operation == "BARRIER":
             skipped_operations.append({"op_id": operation.op_id, "operation": base_operation, "reason": "barrier"})
             continue
-        if base_operation == "H" and operation.op_kind == "single_qubit":
-            trace.add_operation(instruction_ids.H, operation.qargs)
+        if base_operation in NATIVE_SINGLE_QUBIT_INSTRUCTIONS and operation.op_kind == "single_qubit":
+            trace.add_operation(NATIVE_SINGLE_QUBIT_INSTRUCTIONS[base_operation], operation.qargs)
+        elif base_operation in NATIVE_ROTATION_INSTRUCTIONS and operation.op_kind == "single_qubit":
+            qre_parameters = [_native_rotation_parameter(operation)]
+            trace.add_operation(
+                NATIVE_ROTATION_INSTRUCTIONS[base_operation],
+                operation.qargs,
+                qre_parameters,
+            )
         elif base_operation == "CX" and operation.op_kind == "two_qubit_local":
             trace.add_operation(instruction_ids.CX, operation.qargs)
         elif base_operation == "MEASURE" and operation.op_kind == "measure":
             trace.add_operation(instruction_ids.MEAS_Z, operation.qargs)
+        elif base_operation == "RESET" and operation.op_kind == "reset":
+            trace.add_operation(instruction_ids.MEAS_RESET_Z, operation.qargs)
         else:
             raise ResourceEstimatorError(
                 f"Native QRE does not support operation {base_operation} at {operation.op_id}. "
@@ -155,6 +198,9 @@ def logical_ir_to_native_qre_trace(logical_ir: LogicalIR) -> tuple[Trace, dict[s
                 "op_id": operation.op_id,
                 "operation": base_operation,
                 "qargs": operation.qargs,
+                "parameters": operation.parameters,
+                "qre_parameters": qre_parameters,
+                "qre_instruction": _qre_instruction_label(base_operation),
             }
         )
 
@@ -165,8 +211,54 @@ def logical_ir_to_native_qre_trace(logical_ir: LogicalIR) -> tuple[Trace, dict[s
         "skipped_operation_count": len(skipped_operations),
         "mapped_operations": mapped_operations,
         "skipped_operations": skipped_operations,
+        "source_operations": source_operations,
         "trace_json": trace.to_json(),
+        "mapping_notes": [
+            "X maps to qdk.qre.instruction_ids.PAULI_X.",
+            "Z maps to qdk.qre.instruction_ids.PAULI_Z.",
+            "S and SDG map to qdk.qre.instruction_ids.S and S_DAG.",
+            "T and TDG map to qdk.qre.instruction_ids.T and T_DAG; the installed QDK lattice-surgery transform accepts and estimates them without exposing a separate factory-model input in this API.",
+            "RX, RY, and RZ map to qdk.qre rotation instruction IDs with one angle parameter.",
+            "RESET maps to qdk.qre.instruction_ids.MEAS_RESET_Z because the installed QDK exposes measurement-reset instructions rather than a plain reset instruction.",
+        ],
     }
+
+
+def _native_rotation_parameter(operation: Any) -> float:
+    if not operation.parameters:
+        raise ResourceEstimatorError(f"Native QRE rotation {operation.operation} at {operation.op_id} requires one angle parameter.")
+    value = operation.parameters[0]
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip()
+    if not re.fullmatch(r"[0-9eE+\\-*/(). pi]+", text):
+        raise ResourceEstimatorError(f"Native QRE rotation {operation.operation} at {operation.op_id} has unsupported angle parameter: {text}.")
+    try:
+        return float(eval(text, {"__builtins__": {}}, {"pi": math.pi}))
+    except Exception as exc:
+        raise ResourceEstimatorError(f"Native QRE rotation {operation.operation} at {operation.op_id} has invalid angle parameter: {text}.") from exc
+
+
+def _qre_instruction_label(base_operation: str) -> str:
+    if base_operation in NATIVE_SINGLE_QUBIT_INSTRUCTIONS:
+        return {
+            "H": "H",
+            "X": "PAULI_X",
+            "Z": "PAULI_Z",
+            "S": "S",
+            "SDG": "S_DAG",
+            "T": "T",
+            "TDG": "T_DAG",
+        }[base_operation]
+    if base_operation in NATIVE_ROTATION_INSTRUCTIONS:
+        return base_operation
+    if base_operation == "CX":
+        return "CX"
+    if base_operation == "MEASURE":
+        return "MEAS_Z"
+    if base_operation == "RESET":
+        return "MEAS_RESET_Z"
+    return base_operation
 
 
 def _build_qec_model(model_name: str, source: str, raw_parameters: dict[str, Any]) -> tuple[Any, dict[str, Any]]:

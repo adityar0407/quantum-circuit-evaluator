@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import math
 import unittest
 from unittest.mock import patch
 
@@ -32,12 +34,6 @@ h q[0];
 cx q[0],q[1];
 measure q[0] -> c[0];
 measure q[1] -> c[1];
-"""
-
-T_QASM = """OPENQASM 2.0;
-include "qelib1.inc";
-qreg q[1];
-t q[0];
 """
 
 TARGET_CONFIG = {
@@ -303,9 +299,113 @@ class TestNativeQreEstimator(unittest.TestCase):
         self.assertEqual(metrics["native_qre_trace"]["skipped_operation_count"], 1)
         self.assertEqual(metrics["native_qre_trace"]["skipped_operations"][0]["operation"], "BARRIER")
 
-    def test_unsupported_t_fails_clearly(self) -> None:
-        with self.assertRaisesRegex(Exception, "Native QRE does not support operation T"):
-            compile_qasm(T_QASM, TARGET_CONFIG, compiler_backend="qiskit_ftarget", resource_estimator="native_qre")
+    def test_validated_native_single_qubit_operations_work(self) -> None:
+        circuit = QuantumCircuit(1, 1)
+        circuit.x(0)
+        circuit.z(0)
+        circuit.s(0)
+        circuit.sdg(0)
+        circuit.t(0)
+        circuit.tdg(0)
+        circuit.rx(0.25, 0)
+        circuit.ry(0.5, 0)
+        circuit.rz(0.75, 0)
+        circuit.reset(0)
+        circuit.measure(0, 0)
+        target = build_target(TARGET_CONFIG)
+        logical_ir = build_logical_ir(circuit, target, compiler="qiskit_ftarget")
+        compilation = CompilationResult(
+            compiler="qiskit_ftarget",
+            original_circuit=circuit,
+            compiled_circuit=circuit,
+            target=target,
+            estimation_context=build_estimation_context(target),
+            logical_ir=logical_ir,
+        )
+
+        metrics = NativeQreEstimator().estimate(compilation)
+        mapped = metrics["native_qre_trace"]["mapped_operations"]
+        mapped_operations = [operation["operation"] for operation in mapped]
+        qre_instructions = [operation["qre_instruction"] for operation in mapped]
+
+        self.assertEqual(
+            mapped_operations,
+            ["X", "Z", "S", "SDG", "T", "TDG", "RX", "RY", "RZ", "RESET", "MEASURE"],
+        )
+        self.assertIn("MEAS_RESET_Z", qre_instructions)
+        self.assertIn("T_DAG", qre_instructions)
+        self.assertGreater(metrics["physical_qubits"], 0)
+
+    def test_rotation_parameters_survive_logical_ir_to_qre_trace(self) -> None:
+        circuit = QuantumCircuit(1)
+        circuit.rx(math.pi, 0)
+        circuit.ry(math.pi / 2, 0)
+        circuit.rz(-math.pi / 4, 0)
+        circuit.rx(0.123, 0)
+        target = build_target(TARGET_CONFIG)
+        logical_ir = build_logical_ir(circuit, target, compiler="qiskit_ftarget")
+        compilation = CompilationResult(
+            compiler="qiskit_ftarget",
+            original_circuit=circuit,
+            compiled_circuit=circuit,
+            target=target,
+            estimation_context=build_estimation_context(target),
+            logical_ir=logical_ir,
+        )
+
+        metrics = NativeQreEstimator().estimate(compilation)
+        rotations = [
+            operation
+            for operation in metrics["native_qre_trace"]["mapped_operations"]
+            if operation["operation"] in {"RX", "RY", "RZ"}
+        ]
+
+        self.assertEqual([operation["operation"] for operation in rotations], ["RX", "RY", "RZ", "RX"])
+        self.assertAlmostEqual(rotations[0]["parameters"][0], math.pi)
+        self.assertAlmostEqual(rotations[0]["qre_parameters"][0], math.pi)
+        self.assertAlmostEqual(rotations[1]["parameters"][0], math.pi / 2)
+        self.assertAlmostEqual(rotations[1]["qre_parameters"][0], math.pi / 2)
+        self.assertAlmostEqual(rotations[2]["parameters"][0], -math.pi / 4)
+        self.assertAlmostEqual(rotations[2]["qre_parameters"][0], -math.pi / 4)
+        self.assertAlmostEqual(rotations[3]["parameters"][0], 0.123)
+        self.assertAlmostEqual(rotations[3]["qre_parameters"][0], 0.123)
+
+    def test_reproducible_run_export_contains_required_sections(self) -> None:
+        result = compile_qasm(H_CX_MEASURE_QASM, TARGET_CONFIG, compiler_backend="qiskit_ftarget")
+        export = result["artifacts"]["reproducible_run_export"]
+
+        json.dumps(export)
+        self.assertEqual(export["schema_version"], "reproducible_run_export.v1")
+        self.assertIn("run_id", export)
+        self.assertEqual(export["input"]["original_qasm"], H_CX_MEASURE_QASM)
+        self.assertEqual(export["compilation"]["selected_compiler"], "qiskit_ftarget")
+        self.assertIn("OPENQASM", export["compilation"]["compiled_qasm"])
+        self.assertIn("serialized", export["logical_ir"])
+        self.assertIn("logical_depth", export["logical_ir"])
+        self.assertEqual(export["qre_input"]["input_representation"], "qdk.qre.Trace")
+        self.assertGreater(export["qre_input"]["trace_operation_summary"]["mapped_operation_count"], 0)
+        self.assertIn("physical_hardware", export["estimation_assumptions"])
+        self.assertIn("normalized_qdk_hardware_parameters", export["estimation_assumptions"])
+        self.assertIn("qec_model", export["estimation_assumptions"])
+        self.assertEqual(export["results"]["physical_qubits"], result["metrics"]["physical_qubits"])
+        self.assertTrue(any("Remote operations are unsupported" in item for item in export["limitations"]))
+
+    def test_unsupported_unrequested_gate_fails_clearly(self) -> None:
+        circuit = QuantumCircuit(1)
+        circuit.y(0)
+        target = build_target(TARGET_CONFIG)
+        logical_ir = build_logical_ir(circuit, target, compiler="qiskit_ftarget")
+        compilation = CompilationResult(
+            compiler="qiskit_ftarget",
+            original_circuit=circuit,
+            compiled_circuit=circuit,
+            target=target,
+            estimation_context=build_estimation_context(target),
+            logical_ir=logical_ir,
+        )
+
+        with self.assertRaisesRegex(ResourceEstimatorError, "Native QRE does not support operation Y"):
+            NativeQreEstimator().estimate(compilation)
 
     def test_remote_gate_fails_clearly(self) -> None:
         target = build_target(TARGET_CONFIG)

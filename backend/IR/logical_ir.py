@@ -242,7 +242,11 @@ def _build_compiler_metadata(
             "removed_operations": artifacts.get("removed_operations", {}),
             "unsupported_operations": artifacts.get("unsupported_operations", []),
             "database_mode": artifacts.get("database_mode", False),
-            "translation_only_status": artifacts.get("translation_only_status", True),
+            "topology_aware": artifacts.get("topology_aware", False),
+            "topology_lowering": artifacts.get("topology_lowering"),
+            "topology_validation": artifacts.get("topology_validation"),
+            "target_topology": artifacts.get("target_topology"),
+            "support_scan": artifacts.get("support_scan"),
         }
 
     return {

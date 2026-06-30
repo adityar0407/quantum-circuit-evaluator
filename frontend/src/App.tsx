@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Activity, ArrowRight, Binary, CheckCircle2, ChevronRight, FileUp, Play, RefreshCw, RotateCcw, Settings2, Target } from "lucide-react";
-import { fetchResourceCapabilities, previewTarget, transpileCircuit, validateCircuit } from "./api/client";
+import { fetchArchitectureCapabilities, fetchResourceCapabilities, previewTarget, transpileCircuit, validateCircuit } from "./api/client";
 import type {
+  ArchitecturePreset,
   CircuitSummary,
   CompilerBackend,
   EstimationProfiles,
@@ -31,6 +32,7 @@ type WorkStatus = "idle" | "loading" | "ready" | "error";
 type GateGroup = "sq_gates" | "two_q_gates" | "inter_device_gates";
 type AppView = "landing" | "credits" | "tool";
 type ActionState = "idle" | "loading" | "success" | "error";
+type SupportStatus = "supported" | "approximate" | "unsupported";
 
 const compilerLabels: Record<CompilerBackend, string> = {
   auto: "Automatic routing",
@@ -39,8 +41,8 @@ const compilerLabels: Record<CompilerBackend, string> = {
 };
 
 const estimatorLabels: Record<ResourceEstimator, string> = {
-  native_qre: "Native QRE",
-  qiskit_compatibility: "Qiskit compatibility",
+  native_qre: "Fault-tolerant estimate",
+  qiskit_compatibility: "Compatibility estimate",
 };
 
 const topologyLabels: Record<string, string> = {
@@ -53,6 +55,81 @@ const topologyLabels: Record<string, string> = {
 function displayTopology(value: unknown): string {
   const key = String(value ?? "");
   return topologyLabels[key] ?? key;
+}
+
+function supportStatusTone(value: string): SupportStatus {
+  if (value === "approximate" || value === "unsupported") {
+    return value;
+  }
+  return "supported";
+}
+
+function clonePresetConfig(preset: ArchitecturePreset): TargetConfig {
+  return JSON.parse(JSON.stringify({ architecture_preset: preset.id, ...preset.target_config })) as TargetConfig;
+}
+
+function modalityForPreset(preset?: ArchitecturePreset): ModalityKey {
+  if (!preset) {
+    return defaultModality;
+  }
+  if (preset.category.includes("neutral_atom")) {
+    return "neutral_atom";
+  }
+  if (preset.category.includes("trapped_ion") || preset.category.includes("any_to_any")) {
+    return "trapped_ion";
+  }
+  if (
+    preset.category.includes("superconducting") ||
+    preset.id.includes("heavy_hex") ||
+    preset.id.includes("modular_superconducting")
+  ) {
+    return "superconducting";
+  }
+  return "ft_logical";
+}
+
+function hardwareModelForPreset(preset?: ArchitecturePreset): string {
+  if (!preset) {
+    return "gate_based";
+  }
+  return preset.category.includes("neutral_atom") ? "neutral_atom" : "gate_based";
+}
+
+function formatReferenceLabel(reference: string): string {
+  const match = reference.match(/_(\d{4}\.\d{4,5})\.pdf$/);
+  if (match) {
+    return `arXiv ${match[1]}`;
+  }
+  return reference.split("/").at(-1)?.replace(/_/g, " ").replace(/\.pdf$/i, "") ?? reference;
+}
+
+function referenceUrl(reference: string): string | null {
+  const match = reference.match(/_(\d{4}\.\d{4,5})\.pdf$/);
+  if (!match) {
+    return null;
+  }
+  return `https://arxiv.org/abs/${match[1]}`;
+}
+
+function friendlyImplementedAs(value: string): string {
+  const labels: Record<string, string> = {
+    tiled_k_nearest: "Nearest-neighbor tile layout",
+    heavy_hex: "Heavy-hex coupling graph",
+    heavy_square: "Heavy-square coupling graph",
+    unsupported: "Reference only",
+  };
+  return labels[value] ?? humanizeKey(value);
+}
+
+function friendlyProfileMode(value: string): string {
+  return value === "custom" ? "Custom numbers" : "Recommended defaults";
+}
+
+function friendlyHardwareModel(key: string): string {
+  if (key === "neutral_atom") {
+    return "Neutral-atom hardware model";
+  }
+  return "Gate-based hardware model";
 }
 
 function cloneConfig(config: TargetConfig): TargetConfig {
@@ -148,6 +225,18 @@ function formatQecParameterValue(value: unknown): string {
     return "QDK default";
   }
   return formatNumber(value);
+}
+
+function downloadJson(filename: string, payload: unknown) {
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 function humanizeKey(key: string): string {
@@ -463,6 +552,11 @@ function DetailBlock({
   );
 }
 
+function SupportStatusChip({ status }: { status: string }) {
+  const tone = supportStatusTone(status);
+  return <span className={`support-status-chip status-${tone}`}>{humanizeKey(status)}</span>;
+}
+
 function SummaryStrip({ summary }: { summary?: CircuitSummary }) {
   return (
     <div className="summary-strip">
@@ -678,6 +772,8 @@ export function App() {
   const [resourceEstimator, setResourceEstimator] = useState<ResourceEstimator>("native_qre");
   const [estimationProfiles, setEstimationProfiles] = useState<EstimationProfiles>(() => cloneEstimationProfiles());
   const [resourceCapabilities, setResourceCapabilities] = useState<ResourceCapabilities>();
+  const [architecturePresets, setArchitecturePresets] = useState<ArchitecturePreset[]>([]);
+  const [showAdvancedArchitecture, setShowAdvancedArchitecture] = useState(false);
   const [modalitySettings, setModalitySettings] = useState<ModalitySettings>(() =>
     cloneModalitySettings(defaultModality),
   );
@@ -696,6 +792,7 @@ export function App() {
   const breakdown = asRecord(physicalCounts.breakdown);
   const qreAssumptions = asRecord(metrics.qre_assumptions);
   const routingArtifacts = asRecord(runResult?.artifacts);
+  const reproducibleExport = asRecord(routingArtifacts.reproducible_run_export);
   const reportData = asRecord(metrics.report_data);
   const translationNotes = asStringArray(qreAssumptions.translation_notes);
   const physicalProfile = estimationProfiles.physical_hardware;
@@ -715,6 +812,22 @@ export function App() {
   const selectedQecModelDescription =
     qecModelOptions.find((model) => model.key === selectedQecModel)?.description ??
     "Uses the selected QDK QEC model.";
+  const selectedArchitectureId = String(targetConfig.architecture_preset ?? defaultTargetConfig.architecture_preset ?? "");
+  const selectedArchitecture = architecturePresets.find((preset) => preset.id === selectedArchitectureId);
+  const architectureMetadata = asRecord(targetConfig.architecture_metadata);
+  const architectureLimitations = asStringArray(
+    targetPreview?.architecture_limitations ?? architectureMetadata.limitations ?? selectedArchitecture?.limitations,
+  );
+  const architectureReferences = asStringArray(architectureMetadata.references ?? selectedArchitecture?.references);
+  const architectureSupportStatus = String(
+    architectureMetadata.support_status ?? selectedArchitecture?.support_status ?? "supported",
+  );
+  const architectureIsUnsupported = architectureSupportStatus === "unsupported";
+  const inferredModality = modalityForPreset(selectedArchitecture);
+  const hardwareModelExplanation =
+    selectedHardwareModel === "neutral_atom"
+      ? "Uses timing and error assumptions shaped for neutral-atom style gates."
+      : "Uses timing and error assumptions for standard gate-based hardware, which is the closest built-in model for superconducting and ion-style devices here.";
 
   const interpretation = buildInterpretation({
     runResult,
@@ -743,6 +856,19 @@ export function App() {
       .catch(() => setResourceCapabilities(undefined));
   }, []);
 
+  useEffect(() => {
+    fetchArchitectureCapabilities()
+      .then((payload) => {
+        setArchitecturePresets(payload.architectures);
+        const initialPreset =
+          payload.architectures.find((preset) => preset.id === targetConfig.architecture_preset) ?? payload.architectures[0];
+        if (initialPreset) {
+          applyArchitecturePreset(initialPreset.id, payload.architectures);
+        }
+      })
+      .catch(() => setArchitecturePresets([]));
+  }, []);
+
   function updateTopology(key: string, value: string | number) {
     setTargetConfig((current) => ({
       ...current,
@@ -751,6 +877,31 @@ export function App() {
         [key]: value,
       },
     }));
+  }
+
+  function applyArchitecturePreset(presetId: string, presets = architecturePresets) {
+    const preset = presets.find((entry) => entry.id === presetId);
+    if (!preset) {
+      return;
+    }
+
+    const nextModality = modalityForPreset(preset);
+    const nextSettings = cloneModalitySettings(nextModality);
+    const nextHardwareModel = hardwareModelForPreset(preset);
+
+    setSelectedModality(nextModality);
+    setModalitySettings(nextSettings);
+    setTargetConfig(clonePresetConfig(preset));
+    setEstimationProfiles((current) => ({
+      ...current,
+      physical_hardware: {
+        ...current.physical_hardware,
+        qdk_hardware_model: nextHardwareModel,
+        physical_modality: nextHardwareModel,
+      },
+    }));
+    setTargetPreview(undefined);
+    setRunResult(undefined);
   }
 
   function applyModality(value: ModalityKey) {
@@ -895,6 +1046,12 @@ export function App() {
   }
 
   async function handlePreview() {
+    if (architectureIsUnsupported) {
+      setStatus("error");
+      setMessage("This architecture is documented as unsupported and cannot be previewed or compiled yet.");
+      return;
+    }
+
     setStatus("loading");
     setMessage("Building target");
     try {
@@ -909,6 +1066,12 @@ export function App() {
   }
 
   async function handleRun() {
+    if (architectureIsUnsupported) {
+      setStatus("error");
+      setMessage("This architecture is documented as unsupported and cannot be compiled yet.");
+      return;
+    }
+
     setStatus("loading");
     setMessage("Running compilation and resource estimation");
     try {
@@ -931,8 +1094,15 @@ export function App() {
 
   function resetDefaults() {
     setQasm(defaultQasm);
-    setTargetConfig(cloneConfig(defaultTargetConfig));
-    setSelectedModality(defaultModality);
+    const defaultPreset = architecturePresets.find(
+      (preset) => preset.id === defaultTargetConfig.architecture_preset,
+    );
+    if (defaultPreset) {
+      applyArchitecturePreset(defaultPreset.id);
+    } else {
+      setTargetConfig(cloneConfig(defaultTargetConfig));
+      setSelectedModality(defaultModality);
+    }
     setResourceEstimator("native_qre");
     setEstimationProfiles(cloneEstimationProfiles());
     setModalitySettings(cloneModalitySettings(defaultModality));
@@ -941,6 +1111,14 @@ export function App() {
     setRunResult(undefined);
     setStatus("idle");
     setMessage(undefined);
+  }
+
+  function handleDownloadRunExport() {
+    if (!runResult || Object.keys(reproducibleExport).length === 0) {
+      return;
+    }
+    const runId = String(reproducibleExport.run_id ?? "run");
+    downloadJson(`${runId}_qre_export.json`, reproducibleExport);
   }
 
   if (view === "landing") {
@@ -1055,37 +1233,43 @@ export function App() {
           <div className="section-grid single">
             <article className="surface-card">
               <SectionLabel>Target controls</SectionLabel>
+              <p className="body-copy">
+                Pick the hardware architecture you want to study. The compiler basis and default gate family are chosen
+                automatically from that hardware choice.
+              </p>
               <div className="form-grid">
                 <label className="field">
-                  <span>Topology</span>
-                  <select
-                    value={String(topology.type ?? "tiled_k_nearest")}
-                    onChange={(event) => updateTopology("type", event.target.value)}
-                  >
-                    <option value="tiled_k_nearest">Distributed Logical Tile</option>
-                    <option value="heavy_hex">IBM Heavy Hex</option>
-                    <option value="heavy_square">IBM Heavy Square</option>
-                  </select>
-                </label>
-                <label className="field">
-                  <span>Modality</span>
-                  <select
-                    value={selectedModality}
-                    onChange={(event) => applyModality(event.target.value as ModalityKey)}
-                  >
-                    {Object.entries(modalityPresets).map(([key, preset]) => (
-                      <option key={key} value={key}>
-                        {preset.label}
+                  <span>Hardware architecture</span>
+                  <select value={selectedArchitectureId} onChange={(event) => applyArchitecturePreset(event.target.value)}>
+                    {architecturePresets.map((preset) => (
+                      <option key={preset.id} value={preset.id}>
+                        {preset.display_name}
                       </option>
                     ))}
                   </select>
                 </label>
                 <div className="field static-field">
-                  <span>Compiler route</span>
-                  <strong>Automatic</strong>
+                  <span>Model status</span>
+                  <strong>{selectedArchitecture ? <SupportStatusChip status={selectedArchitecture.support_status} /> : "Loading"}</strong>
+                </div>
+                <div className="field static-field">
+                  <span>Connectivity model</span>
+                  <strong>{selectedArchitecture ? friendlyImplementedAs(selectedArchitecture.implemented_as) : displayTopology(topology.type)}</strong>
+                </div>
+                <div className="field static-field">
+                  <span>Hardware family</span>
+                  <strong>{selectedArchitecture ? humanizeKey(selectedArchitecture.category) : "Loading"}</strong>
+                </div>
+                <div className="field static-field">
+                  <span>Compiler basis</span>
+                  <strong>{modalityPresets[inferredModality].label}</strong>
+                </div>
+                <div className="field static-field">
+                  <span>Compiler mode</span>
+                  <strong>Automatic best-fit compiler</strong>
                 </div>
                 <label className="field">
-                  <span>Estimator</span>
+                  <span>Estimate mode</span>
                   <select
                     value={resourceEstimator}
                     onChange={(event) => {
@@ -1093,66 +1277,147 @@ export function App() {
                       setRunResult(undefined);
                     }}
                   >
-                    <option value="native_qre">Native QRE</option>
-                    <option value="qiskit_compatibility">Qiskit compatibility</option>
+                    <option value="native_qre">Fault-tolerant estimate (recommended)</option>
+                    <option value="qiskit_compatibility">Compatibility estimate (legacy path)</option>
                   </select>
                 </label>
-                <NumericField
-                  label="Block rows"
-                  value={asNumber(topology.n_blocks_row, 1)}
-                  onChange={(value) => updateTopology("n_blocks_row", value)}
-                />
-                <NumericField
-                  label="Block columns"
-                  value={asNumber(topology.n_blocks_col, 1)}
-                  onChange={(value) => updateTopology("n_blocks_col", value)}
-                />
-                {topology.type === "tiled_k_nearest" ? (
-                  <>
-                    <NumericField label="n" value={asNumber(topology.n, 1)} onChange={(value) => updateTopology("n", value)} />
-                    <NumericField label="m" value={asNumber(topology.m, 1)} onChange={(value) => updateTopology("m", value)} />
-                    <NumericField
-                      label="k intra"
-                      value={asNumber(topology.k_intra, 1)}
-                      onChange={(value) => updateTopology("k_intra", value)}
-                    />
-                    <NumericField
-                      label="k inter"
-                      value={asNumber(topology.k_inter, 1)}
-                      onChange={(value) => updateTopology("k_inter", value)}
-                    />
-                    <NumericField
-                      label="connector local"
-                      value={asNumber(topology.connector_local, 1)}
-                      onChange={(value) => updateTopology("connector_local", value)}
-                    />
-                  </>
-                ) : (
-                  <>
-                    <NumericField label="Distance" value={asNumber(topology.d, 3)} onChange={(value) => updateTopology("d", value)} />
-                    <NumericField
-                      label="k inter"
-                      value={asNumber(topology.k_inter, 1)}
-                      onChange={(value) => updateTopology("k_inter", value)}
-                    />
-                  </>
-                )}
               </div>
+
+              {selectedArchitecture ? (
+                <div className="subsection-block">
+                  <h4>{selectedArchitecture.display_name}</h4>
+                  <p className="body-copy">
+                    {selectedArchitecture.limitations[0] ?? "No architecture notes available."}
+                  </p>
+                  <p className="field-hint">
+                    The compiler basis follows the selected hardware automatically. Superconducting presets use a superconducting
+                    gate family, neutral-atom presets use neutral-atom gates, and ion-style presets use ion-style gates.
+                  </p>
+                  {selectedArchitecture.support_status === "approximate" ? (
+                    <div className="warning-block">
+                      This architecture is modeled as a research approximation: the connectivity is enforced, but some
+                      device-specific effects from the source papers are still simplified.
+                    </div>
+                  ) : null}
+                  {selectedArchitecture.support_status === "unsupported" ? (
+                    <div className="warning-block">
+                      This paper family is stored as a future reference only. The current compiler pipeline will reject it before preview or run.
+                    </div>
+                  ) : null}
+                  <div className="detail-list architecture-reference-list">
+                    {selectedArchitecture.references.map((reference) => (
+                      <div key={reference}>
+                        <dt>Paper</dt>
+                        <dd>
+                          {referenceUrl(reference) ? (
+                            <a href={referenceUrl(reference) ?? "#"} target="_blank" rel="noreferrer">
+                              {formatReferenceLabel(reference)}
+                            </a>
+                          ) : (
+                            formatReferenceLabel(reference)
+                          )}
+                        </dd>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
 
               <div className="insight-strip">
                 <div className="inline-note">
                   <Settings2 aria-hidden="true" />
                   <p>
-                    FTarget now describes only logical architecture: topology, gate families, and routing metadata.
-                    Physical hardware and QEC assumptions are handled separately in the estimation layer.
+                    FTarget is the architecture description the compilers actually obey. It sets which qubits may interact,
+                    which gate families are native, and what routing constraints Pandora or Qiskit must respect.
                   </p>
                 </div>
+              </div>
+
+              <div className="subsection-block">
+                <button type="button" className="secondary" onClick={() => setShowAdvancedArchitecture((current) => !current)}>
+                  <Settings2 aria-hidden="true" /> {showAdvancedArchitecture ? "Hide advanced graph settings" : "Show advanced graph settings"}
+                </button>
+                {showAdvancedArchitecture ? (
+                  <div className="advanced-block">
+                    <p className="field-hint">
+                      These are backend graph-generator settings. Most users should leave them unchanged unless they are deliberately
+                      editing the preset for a custom experiment.
+                    </p>
+                    <div className="form-grid">
+                      <label className="field">
+                        <span>Backend graph model</span>
+                        <select
+                          value={String(topology.type ?? "tiled_k_nearest")}
+                          onChange={(event) => updateTopology("type", event.target.value)}
+                        >
+                          <option value="tiled_k_nearest">Nearest-neighbor tile layout</option>
+                          <option value="heavy_hex">Heavy-hex graph</option>
+                          <option value="heavy_square">Heavy-square graph</option>
+                        </select>
+                      </label>
+                      <NumericField label="Tile rows" value={asNumber(topology.n_blocks_row, 1)} onChange={(value) => updateTopology("n_blocks_row", value)} />
+                      <NumericField label="Tile columns" value={asNumber(topology.n_blocks_col, 1)} onChange={(value) => updateTopology("n_blocks_col", value)} />
+                      {topology.type === "tiled_k_nearest" ? (
+                        <>
+                          <NumericField label="Qubits per tile row" value={asNumber(topology.n, 1)} onChange={(value) => updateTopology("n", value)} />
+                          <NumericField label="Qubits per tile column" value={asNumber(topology.m, 1)} onChange={(value) => updateTopology("m", value)} />
+                          <NumericField label="Neighbor reach inside a tile" value={asNumber(topology.k_intra, 1)} onChange={(value) => updateTopology("k_intra", value)} />
+                          <NumericField label="Neighbor reach between tiles" value={asNumber(topology.k_inter, 1)} onChange={(value) => updateTopology("k_inter", value)} />
+                          <NumericField label="Inter-tile connector count" value={asNumber(topology.connector_local, 1)} onChange={(value) => updateTopology("connector_local", value)} />
+                        </>
+                      ) : (
+                        <>
+                          <NumericField label="Code distance / scale" value={asNumber(topology.d, 3)} onChange={(value) => updateTopology("d", value)} />
+                          <NumericField label="Inter-block coupling count" value={asNumber(topology.k_inter, 1)} onChange={(value) => updateTopology("k_inter", value)} />
+                        </>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            </article>
+
+            <article className="surface-card chart-card architecture-preview-card">
+              <SectionLabel>Architecture preview</SectionLabel>
+              <p className="body-copy">
+                Preview the qubit layout and allowed connections for the selected hardware model before you run compilation.
+              </p>
+              <div className="summary-strip architecture-preview-strip">
+                <SurfaceMetric label="Architecture" value={targetPreview?.architecture_id ?? selectedArchitecture?.display_name ?? "-"} />
+                <SurfaceMetric label="Gate family" value={modalityPresets[selectedModality].label} />
+                <SurfaceMetric label="Qubits" value={targetPreview?.total_qubits ?? "-"} />
+                <SurfaceMetric label="Connections" value={targetPreview?.total_edges ?? "-"} />
+              </div>
+              <TargetGraph preview={targetPreview} />
+              <div className="subsection-block">
+                <h4>Supported interactions</h4>
+                <OperationList
+                  counts={Object.fromEntries((targetPreview?.operation_names ?? []).map((name) => [name, 1]))}
+                />
+              </div>
+              <div className="subsection-block">
+                <h4>What to watch for</h4>
+                {architectureLimitations.length ? (
+                  <ul className="translation-note-list">
+                    {architectureLimitations.map((note) => (
+                      <li key={note}>
+                        <ChevronRight aria-hidden="true" />
+                        <span>{note}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="detail-empty">Preview the target to inspect architecture limits and routing constraints.</p>
+                )}
               </div>
             </article>
 
             <article className="surface-card">
-              <SectionLabel>Modality configuration</SectionLabel>
+              <SectionLabel>Compiler basis</SectionLabel>
               <p className="body-copy">{modalityPresets[selectedModality].description}</p>
+              <p className="field-hint">
+                These weights tell the compiler which native gates and moves should be considered cheaper or more desirable for this hardware family.
+              </p>
               <div className="form-grid">
                 {modalityPresets[selectedModality].fields.map((field) => (
                   <NumericField
@@ -1170,21 +1435,21 @@ export function App() {
             <article className="surface-card">
               <SectionLabel>Fault-tolerant estimation profile</SectionLabel>
               <p className="body-copy">
-                These assumptions feed native QRE. FTarget remains logical-only; physical errors, gate timings, and
-                network metadata are carried separately.
+                These settings control the physical assumptions used during resource estimation: gate error rates, gate
+                times, QEC settings, and any remote-link assumptions you want to include.
               </p>
               <div className="form-grid">
                 <AssumptionField
-                  label="QRE error budget"
+                  label="Target logical failure budget"
                   value={qecProfile.error_budget}
                   min="0"
                   onChange={(value) => updateProfileSection("qec", "error_budget", value)}
                 />
                 <label className="field">
-                  <span>QEC model source</span>
+                  <span>QEC parameter mode</span>
                   <select value={qecModelSource} onChange={(event) => updateQecModelSource(event.target.value)}>
-                    <option value="azure_builtin">Azure QRE built-in</option>
-                    <option value="custom">Custom QDK parameters</option>
+                    <option value="azure_builtin">Use recommended defaults</option>
+                    <option value="custom">Edit advanced QEC parameters</option>
                   </select>
                 </label>
               </div>
@@ -1192,30 +1457,30 @@ export function App() {
               <div className="subsection-block">
                 <h4>Physical hardware model</h4>
                 <p className="field-hint">
-                  These assumptions are mapped directly into the QDK physical qubit model used by native QRE. The
-                  result records the exact mapping and any ignored fields.
+                  Choose the physical assumption model used by the estimator. This does not change the compiled circuit;
+                  it changes how time, error, and qubit overhead are priced.
                 </p>
                 <div className="form-grid qec-model-grid">
                   <label className="field">
-                    <span>Profile mode</span>
+                    <span>Numbers source</span>
                     <select value={physicalProfileMode} onChange={(event) => updatePhysicalProfileMode(event.target.value)}>
-                      <option value="built_in">Built-in verified model</option>
-                      <option value="custom">Custom profile</option>
+                      <option value="built_in">Recommended defaults</option>
+                      <option value="custom">Enter my own numbers</option>
                     </select>
                   </label>
                   <label className="field">
-                    <span>QDK hardware model</span>
+                    <span>Estimator hardware family</span>
                     <select value={selectedHardwareModel} onChange={(event) => updateHardwareModel(event.target.value)}>
                       {verifiedHardwareModels.map((model) => (
                         <option key={model.key} value={model.key}>
-                          {model.label}
+                          {friendlyHardwareModel(model.key)}
                         </option>
                       ))}
                     </select>
                   </label>
                   <div className="field static-field qec-model-description">
-                    <span>Verified model</span>
-                    <strong>{selectedHardwareCapability?.description ?? "Loading backend capabilities..."}</strong>
+                    <span>What this means</span>
+                    <strong>{hardwareModelExplanation}</strong>
                   </div>
                 </div>
                 {physicalProfileMode === "custom" ? (
@@ -1228,7 +1493,7 @@ export function App() {
                             value={String(physicalProfile.physical_modality ?? "gate_based")}
                             onChange={(event) => updateProfileSection("physical_hardware", "physical_modality", event.target.value)}
                           >
-                            <option value="gate_based">Gate based</option>
+                            <option value="gate_based">Gate-based</option>
                             <option value="neutral_atom">Neutral atom</option>
                             <option value="superconducting">Superconducting</option>
                             <option value="trapped_ion">Trapped ion</option>
@@ -1258,7 +1523,7 @@ export function App() {
               </div>
 
               <div className="subsection-block">
-                <h4>{qecModelSource === "custom" ? "Custom QEC model parameters" : "Azure QRE QEC model"}</h4>
+                <h4>{qecModelSource === "custom" ? "Advanced QEC parameters" : "QEC model"}</h4>
                 <div className="form-grid qec-model-grid">
                   <label className="field">
                     <span>QEC model</span>
@@ -1277,8 +1542,8 @@ export function App() {
                 </div>
                 <p className="field-hint">
                   {qecModelSource === "custom"
-                    ? "Custom mode parameterizes the selected QDK QEC model class before native QRE estimation."
-                    : "Built-in mode uses the selected QDK model's default constructor values. These are shown below and sent implicitly to QRE."}
+                    ? "You are editing the deeper parameters for the chosen QEC model."
+                    : "These are the default numbers used by the chosen QEC model."}
                 </p>
                 {qecModelSource === "custom" ? (
                   <div className="form-grid">
@@ -1316,17 +1581,17 @@ export function App() {
                     ))}
                     <div className="inline-note qec-note">
                       <Settings2 aria-hidden="true" />
-                      <p>Switch to custom parameters to override these values before native QRE estimation.</p>
+                      <p>Switch to advanced QEC parameters if you want to override these defaults.</p>
                     </div>
                   </div>
                 )}
               </div>
 
               <div className="subsection-block">
-                <h4>Network metadata</h4>
+                <h4>Remote-link assumptions</h4>
                 <div className="form-grid">
                   <label className="field">
-                    <span>Network topology</span>
+                    <span>System organization</span>
                     <select
                       value={String(networkProfile.topology ?? "none")}
                       onChange={(event) => updateProfileSection("network", "topology", event.target.value)}
@@ -1357,8 +1622,8 @@ export function App() {
                   />
                 </div>
                 <p className="field-hint">
-                  Remote-operation fields are carried as network metadata. Teleportation, Bell-pair generation, and
-                  retry overhead are not priced in the compatibility path yet.
+                  Use these only if you want the estimate to carry assumptions about remote links between modules. For a
+                  single chip or single array, leaving them blank is usually the right choice.
                 </p>
               </div>
             </article>
@@ -1371,47 +1636,20 @@ export function App() {
           </div>
         </section>
 
-        <section id="preview" className="workspace-section">
-          <div className="section-header">
-            <div>
-              <SectionLabel>Stage 3</SectionLabel>
-              <h2>Target preview and compiled geometry</h2>
-            </div>
-          </div>
-
-          <div className="section-grid">
-            <article className="surface-card chart-card">
-              <SectionLabel>Coupling graph</SectionLabel>
-              <TargetGraph preview={targetPreview} />
-            </article>
-
-            <article className="surface-card">
-              <SectionLabel>Preview summary</SectionLabel>
-              <div className="summary-strip">
-                <SurfaceMetric label="Topology" value={targetPreview ? displayTopology(targetPreview.topology_type) : "-"} />
-                <SurfaceMetric label="Modality" value={modalityPresets[selectedModality].label} />
-                <SurfaceMetric label="Qubits" value={targetPreview?.total_qubits ?? "-"} />
-                <SurfaceMetric label="Edges" value={targetPreview?.total_edges ?? "-"} />
-              </div>
-              <div className="subsection-block">
-                <h4>Supported operations</h4>
-                <OperationList
-                  counts={Object.fromEntries((targetPreview?.operation_names ?? []).map((name) => [name, 1]))}
-                />
-              </div>
-            </article>
-          </div>
-        </section>
-
         <section id="results" className="workspace-section">
           <div className="section-header">
             <div>
-              <SectionLabel>Stage 4</SectionLabel>
+              <SectionLabel>Stage 3</SectionLabel>
               <h2>Compilation and resource-estimation results</h2>
             </div>
-            <button type="button" onClick={handleRun} disabled={status === "loading"}>
-              <Play aria-hidden="true" /> Run
-            </button>
+            <div className="section-actions">
+              <button type="button" className="secondary" onClick={handleDownloadRunExport} disabled={!runResult || Object.keys(reproducibleExport).length === 0}>
+                <FileUp aria-hidden="true" /> Download JSON export
+              </button>
+              <button type="button" onClick={handleRun} disabled={status === "loading"}>
+                <Play aria-hidden="true" /> Run
+              </button>
+            </div>
           </div>
 
           <div className="section-grid">
@@ -1450,6 +1688,7 @@ export function App() {
                 <SurfaceMetric label="Compiled depth" value={runResult?.transpiled.depth ?? "-"} />
                 <SurfaceMetric label="Compiled gates" value={runResult?.transpiled.gate_count ?? "-"} />
                 <SurfaceMetric label="Route mode" value={routingArtifacts.routing_mode ?? "-"} />
+                <SurfaceMetric label="Architecture" value={runResult ? selectedArchitecture?.display_name ?? selectedArchitectureId : "-"} />
                 <SurfaceMetric label="Measurement added for QRE" value={metrics.measurement_added_for_qre ?? "-"} />
                 <SurfaceMetric label="RQOps" value={metrics.rqops ?? "-"} />
                 <SurfaceMetric label="Algorithmic logical qubits" value={breakdown.algorithmicLogicalQubits ?? "-"} />
@@ -1480,6 +1719,15 @@ export function App() {
             </article>
 
             <DetailBlock title="QRE assumptions" values={qreAssumptions} />
+            <DetailBlock
+              title="Architecture metadata"
+              values={{
+                architecture_preset: selectedArchitectureId,
+                support_status: architectureSupportStatus,
+                references: architectureReferences,
+                limitations: architectureLimitations,
+              }}
+            />
             <DetailBlock title="Logical counts" values={logicalCounts} />
             <DetailBlock title="Physical counts" values={physicalCounts} />
             <DetailBlock title="Breakdown" values={breakdown} />

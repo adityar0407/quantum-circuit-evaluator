@@ -7,8 +7,25 @@ export type CircuitSummary = {
 };
 
 export type TargetConfig = {
+  architecture_preset?: string;
+  architecture_metadata?: Record<string, unknown>;
   topology: Record<string, unknown>;
   profile: Record<string, unknown>;
+};
+
+export type ArchitecturePreset = {
+  id: string;
+  display_name: string;
+  category: string;
+  implemented_as: string;
+  support_status: "supported" | "approximate" | "unsupported" | string;
+  references: string[];
+  limitations: string[];
+  target_config: TargetConfig;
+};
+
+export type ArchitectureCapabilities = {
+  architectures: ArchitecturePreset[];
 };
 
 export type EstimationProfiles = {
@@ -42,11 +59,23 @@ export type ResourceCapabilities = {
 };
 
 export type TargetPreview = {
+  architecture_id?: string;
   topology_type: string;
   total_qubits: number;
+  number_of_qubits?: number;
   total_edges: number;
   n_block: number;
+  n_blocks_row?: number;
+  n_blocks_col?: number;
   operation_names: string[];
+  native_gate_set?: string[];
+  allowed_coupling_edges?: Array<{ source: number; target: number }>;
+  allowed_coupling_edges_undirected?: Array<[number, number]>;
+  qubit_to_node_mapping?: Record<string, number> | Record<number, number>;
+  local_edges?: Array<{ source: number; target: number }>;
+  remote_inter_node_edges?: Array<{ source: number; target: number }>;
+  directed_edge_policy?: string;
+  architecture_limitations?: string[];
   nodes: Array<{ id: number; block: number; x: number | null; y: number | null }>;
   edges: Array<{ source: number; target: number; local: boolean }>;
 };
