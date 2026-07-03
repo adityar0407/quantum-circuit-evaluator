@@ -3,7 +3,7 @@
  * Critique persistence helper.
  *
  * Each run of /impeccable critique writes a per-target snapshot to
- *   .impeccable/critique/<timestamp>__<slug>.md
+ *   .impeccable/critique/<slug>.md
  * with a small YAML frontmatter carrying the score + P0/P1 counts.
  *
  * /impeccable polish reads the latest matching snapshot at start as its
@@ -101,7 +101,7 @@ export function writeSnapshot({ slug, meta, body, cwd = process.cwd(), now = new
   const dir = getCritiqueDir(cwd);
   fs.mkdirSync(dir, { recursive: true });
   const timestamp = nowFilenameStamp(now);
-  const filePath = path.join(dir, `${timestamp}__${slug}.md`);
+  const filePath = path.join(dir, `${slug}.md`);
   // Spread `meta` first so internally computed `timestamp` and `slug`
   // always win. Otherwise a caller-supplied meta blob (parsed from the
   // IMPECCABLE_CRITIQUE_META env var) could clobber them, leaving the
@@ -145,13 +145,16 @@ function parseFrontmatter(text) {
 
 /**
  * Return all snapshot files for `slug`, sorted oldest → newest.
+ * Stable storage now keeps one file per slug, but legacy timestamped files
+ * are still read so older repos remain parseable until cleaned up.
  */
 function listSnapshotsForSlug(slug, cwd) {
   const dir = getCritiqueDir(cwd);
   if (!fs.existsSync(dir)) return [];
-  const suffix = `__${slug}.md`;
+  const stableFile = `${slug}.md`;
+  const legacySuffix = `__${slug}.md`;
   return fs.readdirSync(dir)
-    .filter((f) => f.endsWith(suffix))
+    .filter((f) => f === stableFile || f.endsWith(legacySuffix))
     .sort()
     .map((f) => path.join(dir, f));
 }
