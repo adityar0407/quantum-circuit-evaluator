@@ -6,6 +6,12 @@ export type CircuitSummary = {
   operation_counts: Record<string, number>;
 };
 
+export type CircuitPreview = CircuitSummary & {
+  format: "qiskit_text" | string;
+  diagram: string;
+  warnings: string[];
+};
+
 export type TargetConfig = {
   architecture_preset?: string;
   architecture_metadata?: Record<string, unknown>;
@@ -90,6 +96,9 @@ export type TranspileResponse = {
   transpiled: CircuitSummary;
   compiled?: CircuitSummary;
   metrics: Record<string, unknown>;
-  artifacts: Record<string, unknown>;
+  artifacts: Record<string, unknown> & {
+    original_circuit_preview?: CircuitPreview;
+    compiled_circuit_preview?: CircuitPreview;
+  };
   warnings: string[];
 };

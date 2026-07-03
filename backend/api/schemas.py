@@ -18,6 +18,12 @@ class CircuitSummaryResponse(BaseModel):
     operation_counts: dict[str, int]
 
 
+class CircuitPreviewResponse(CircuitSummaryResponse):
+    format: str
+    diagram: str
+    warnings: list[str] = Field(default_factory=list)
+
+
 class TargetPreviewRequest(BaseModel):
     config: dict[str, Any]
 

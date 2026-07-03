@@ -1,6 +1,6 @@
 import type {
   ArchitectureCapabilities,
-  CircuitSummary,
+  CircuitPreview,
   CompilerBackend,
   EstimationProfiles,
   ResourceEstimator,
@@ -42,8 +42,8 @@ async function getJson<T>(path: string): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export function validateCircuit(qasm: string): Promise<CircuitSummary> {
-  return postJson<CircuitSummary>("/circuits/validate", { qasm });
+export function validateCircuit(qasm: string): Promise<CircuitPreview> {
+  return postJson<CircuitPreview>("/circuits/validate", { qasm });
 }
 
 export function previewTarget(config: TargetConfig): Promise<TargetPreview> {

@@ -27,3 +27,15 @@ def circuit_from_qasm(qasm: str) -> QuantumCircuit:
 def summarize_qasm(qasm: str) -> dict:
     return circuit_summary(circuit_from_qasm(qasm))
 
+
+def circuit_preview(circuit: QuantumCircuit) -> dict:
+    return {
+        "format": "qiskit_text",
+        "diagram": circuit.draw(output="text").single_string(),
+        **circuit_summary(circuit),
+        "warnings": [],
+    }
+
+
+def preview_qasm(qasm: str) -> dict:
+    return circuit_preview(circuit_from_qasm(qasm))

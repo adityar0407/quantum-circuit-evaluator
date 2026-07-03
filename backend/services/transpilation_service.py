@@ -4,6 +4,7 @@ from dataclasses import replace
 from typing import Any
 
 from backend.services.circuit_service import circuit_from_qasm
+from backend.services.circuit_service import circuit_preview
 from backend.services.circuit_service import circuit_summary
 from backend.services.compilers import get_compiler_backend
 from backend.services.compilers.pandora_compiler import PandoraCompiler
@@ -118,6 +119,8 @@ def compile_qasm(
         raise TranspilationError(str(exc)) from exc
 
     compiled_summary = circuit_summary(compilation.compiled_circuit)
+    compilation.artifacts["original_circuit_preview"] = circuit_preview(compilation.original_circuit)
+    compilation.artifacts["compiled_circuit_preview"] = circuit_preview(compilation.compiled_circuit)
 
     return {
         "compiler": compilation.compiler,
