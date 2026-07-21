@@ -8,6 +8,7 @@ from unittest.mock import patch
 from qiskit import QuantumCircuit
 
 from backend.IR.logical_ir import build_logical_ir
+from backend.hardware.architecture_presets import resolve_architecture_config
 from backend.services.circuit_service import circuit_from_qasm
 from backend.services.compilers.base import CompilationResult
 from backend.services.compilers.base import CompilerError
@@ -85,6 +86,22 @@ LINEAR_TARGET_CONFIG = {
     },
 }
 
+LINEAR_RZ_TARGET_CONFIG = {
+    "topology": LINEAR_TARGET_CONFIG["topology"],
+    "profile": {
+        "sq_gates": {
+            "HGate": {"logical_weight": 1, "logical_preference": 1},
+            "XGate": {"logical_weight": 1, "logical_preference": 1},
+            "RZGate": {"logical_weight": 0.5, "logical_preference": 0.8},
+        },
+        "two_q_gates": {
+            "CXGate": {"logical_weight": 3, "routing_preference": 2},
+            "SwapGate": {"logical_weight": 3, "routing_preference": 2},
+        },
+        "inter_device_gates": {},
+    },
+}
+
 HEAVY_HEX_TARGET_CONFIG = {
     "topology": {
         "type": "heavy_hex",
@@ -148,6 +165,32 @@ h q[0];
 cx q[0],q[1];
 cx q[0],q[2];
 cx q[0],q[3];
+"""
+
+CONTROLLED_PHASE_QASM = """OPENQASM 2.0;
+include "qelib1.inc";
+qreg q[2];
+cu1(pi/2) q[0],q[1];
+"""
+
+QFT_WITH_BARRIER_QASM = """OPENQASM 2.0;
+include "qelib1.inc";
+qreg q[4];
+creg c[4];
+x q[0];
+x q[2];
+barrier q;
+h q[0];
+cx q[1],q[0];
+h q[1];
+cx q[2],q[0];
+cx q[2],q[1];
+h q[2];
+cx q[3],q[0];
+cx q[3],q[1];
+cx q[3],q[2];
+h q[3];
+measure q -> c;
 """
 
 
@@ -287,7 +330,7 @@ class TestPandoraRouting(unittest.TestCase):
         with self.assertRaises(CompilerError) as ctx:
             compiler.compile(UNSUPPORTED_QASM, target_config=TARGET_CONFIG)
 
-        self.assertIn("Pandora-native routing", str(ctx.exception))
+        self.assertIn("Pandora basis normalization", str(ctx.exception))
         self.assertIn("cu1", str(ctx.exception))
 
     def test_pandora_receives_architecture_constraints_in_artifacts(self) -> None:
@@ -360,6 +403,106 @@ cx q[0],q[3];
             q0 = compiled.find_bit(instruction.qubits[0]).index
             q1 = compiled.find_bit(instruction.qubits[1]).index
             self.assertIn((q0, q1), set(target.cmap.get_edges()))
+
+    def test_pandora_strips_multi_qubit_barriers_before_routing(self) -> None:
+        compiler = PandoraCompiler()
+        submitted_payload: dict[str, object] = {}
+
+        def fake_run(cmd, input, capture_output, check, env, text, timeout):
+            del cmd, capture_output, check, env, text, timeout
+            submitted_payload.update(json.loads(input))
+            return SimpleNamespace(stdout=json.dumps({"translation_only": True}), stderr="")
+
+        with patch.object(compiler, "_support_scan", return_value={"unsupported_operations": [], "supported_qiskit_gates": ["cx", "h", "x", "measure"]}):
+            with patch.object(compiler, "_database_is_available", return_value=False):
+                with patch("backend.services.compilers.pandora_compiler.subprocess.run", side_effect=fake_run):
+                    result = compiler.compile(QFT_WITH_BARRIER_QASM, target_config=LINEAR_TARGET_CONFIG)
+
+        submitted_qasm = str(submitted_payload["qasm"])
+        self.assertEqual(result.compiler, "pandora")
+        self.assertEqual(result.artifacts["basis_normalization"]["removed_barriers"], 1)
+        self.assertEqual(result.artifacts["topology_lowering"]["stripped_barriers"], 0)
+        self.assertNotIn("barrier", submitted_qasm.lower())
+        self.assertNotIn("barrier", result.compiled_circuit.count_ops())
+
+    def test_pandora_skips_database_mode_for_measured_circuits(self) -> None:
+        compiler = PandoraCompiler()
+        submitted_payload: dict[str, object] = {}
+
+        def fake_run(cmd, input, capture_output, check, env, text, timeout):
+            del cmd, capture_output, check, env, text, timeout
+            submitted_payload.update(json.loads(input))
+            return SimpleNamespace(stdout=json.dumps({"translation_only": True}), stderr="")
+
+        with patch.object(compiler, "_support_scan", return_value={"unsupported_operations": [], "supported_qiskit_gates": ["cx", "h", "x", "measure"]}):
+            with patch.object(compiler, "_database_is_available", return_value=True):
+                with patch("backend.services.compilers.pandora_compiler.subprocess.run", side_effect=fake_run):
+                    result = compiler.compile(QFT_WITH_BARRIER_QASM, target_config=LINEAR_TARGET_CONFIG)
+
+        self.assertEqual(result.compiler, "pandora")
+        self.assertEqual(submitted_payload["use_database"], False)
+        self.assertEqual(result.artifacts["database_mode"], False)
+        self.assertIn("gate code 14", result.artifacts["database_skipped_reason"])
+
+    def test_pandora_database_failure_keeps_translation_result(self) -> None:
+        compiler = PandoraCompiler()
+
+        with patch.object(compiler, "_support_scan", return_value={"unsupported_operations": [], "supported_qiskit_gates": ["cx", "h"]}):
+            with patch.object(compiler, "_database_is_available", return_value=True):
+                with patch(
+                    "backend.services.compilers.pandora_compiler.subprocess.run",
+                    return_value=SimpleNamespace(
+                        stdout=json.dumps(
+                            {
+                                "translation_only": True,
+                                "database_enabled": False,
+                                "database_mode": False,
+                                "database_error": "KeyError: 14",
+                                "optimization_passes": [],
+                            }
+                        ),
+                        stderr="",
+                    ),
+                ):
+                    result = compiler.compile(SMALL_QASM, target_config=TARGET_CONFIG)
+
+        self.assertEqual(result.compiler, "pandora")
+        self.assertEqual(result.artifacts["database_mode"], False)
+        self.assertEqual(result.artifacts["database_error"], "KeyError: 14")
+        self.assertTrue(any("database mode failed" in warning for warning in result.warnings))
+
+    def test_pandora_decomposes_controlled_phase_when_rz_is_in_target_basis(self) -> None:
+        compiler = PandoraCompiler()
+        submitted_payload: dict[str, object] = {}
+
+        def fake_run(cmd, input, capture_output, check, env, text, timeout):
+            del cmd, capture_output, check, env, text, timeout
+            submitted_payload.update(json.loads(input))
+            return SimpleNamespace(stdout=json.dumps({"translation_only": True}), stderr="")
+
+        with patch.object(compiler, "_support_scan", return_value={"unsupported_operations": [], "supported_qiskit_gates": ["cx", "rz"]}):
+            with patch.object(compiler, "_database_is_available", return_value=False):
+                with patch("backend.services.compilers.pandora_compiler.subprocess.run", side_effect=fake_run):
+                    result = compiler.compile(CONTROLLED_PHASE_QASM, target_config=LINEAR_RZ_TARGET_CONFIG)
+
+        submitted_qasm = str(submitted_payload["qasm"]).lower()
+        self.assertEqual(result.compiler, "pandora")
+        self.assertIn("rz", submitted_qasm)
+        self.assertIn("cx", submitted_qasm)
+        self.assertNotIn("cu1", submitted_qasm)
+        self.assertIn("cu1", result.artifacts["basis_normalization"]["decomposed_operations"])
+
+    def test_default_surface_preset_accepts_qft_phase_rotations(self) -> None:
+        result = compile_qasm(
+            CONTROLLED_PHASE_QASM,
+            target_config=resolve_architecture_config("square_grid_surface_code"),
+            compiler_backend="qiskit_ftarget",
+            resource_estimator="native_qre",
+        )
+
+        self.assertEqual(result["compiler"], "qiskit_ftarget")
+        self.assertIn("rz", result["transpiled"]["operation_counts"])
+        self.assertNotIn("cu1", result["transpiled"]["operation_counts"])
 
     def test_pandora_rejects_unsupported_topology_types(self) -> None:
         compiler = PandoraCompiler()

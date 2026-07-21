@@ -162,6 +162,25 @@ export function ResultsStage({
   onRun: () => void;
   onDownloadRunExport: () => void;
 }) {
+  if (!runResult) {
+    return (
+      <section id="results" className="workspace-section">
+        <div className="section-header">
+          <div>
+            <SectionLabel>Stage 4</SectionLabel>
+            <h2>Compiled output and resource estimates</h2>
+            <p className="section-copy">No completed run is loaded yet. Run evaluation to populate compiler output and QRE metrics.</p>
+          </div>
+          <div className="section-actions">
+            <button type="button" onClick={onRun} disabled={status === "loading"}>
+              <Play aria-hidden="true" /> Run evaluation
+            </button>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section id="results" className="workspace-section">
       <div className="section-header">
@@ -181,10 +200,10 @@ export function ResultsStage({
       </div>
 
       <div className="summary-strip metric-board">
-        <SurfaceMetric label="Compiler" value={runResult ? compilerLabels[runResult.compiler as CompilerBackend] ?? runResult.compiler : "-"} tone="signal" />
-        <SurfaceMetric label="Estimator" value={runResult ? estimatorLabels[runResult.resource_estimator as ResourceEstimator] ?? runResult.resource_estimator : "-"} tone="signal" />
+        <SurfaceMetric label="Compiler" value={compilerLabels[runResult.compiler as CompilerBackend] ?? runResult.compiler} tone="signal" />
+        <SurfaceMetric label="Estimator" value={estimatorLabels[runResult.resource_estimator as ResourceEstimator] ?? runResult.resource_estimator} tone="signal" />
         <SurfaceMetric label="Physical qubits" value={formatNumber(metrics.physical_qubits ?? metrics.total_physical_qubits ?? "-")} tone="emphasis" />
-        <SurfaceMetric label="Runtime" value={runResult ? formatRuntimeMetric(metrics) : "-"} tone="emphasis" />
+        <SurfaceMetric label="Runtime" value={formatRuntimeMetric(metrics)} tone="emphasis" />
       </div>
 
       <div className="tool-grid tool-grid-results">
@@ -248,7 +267,7 @@ export function ResultsStage({
           <div className="summary-strip compact-summary">
             <SurfaceMetric label="RQOps" value={formatNumber(metrics.rqops ?? "-")} />
             <SurfaceMetric label="Measurement added" value={formatNumber(metrics.measurement_added_for_qre ?? "-")} />
-            <SurfaceMetric label="Logical qubits" value={formatNumber(breakdown.algorithmicLogicalQubits ?? "-")} />
+            <SurfaceMetric label="Logical qubits" value={formatNumber(breakdown.algorithmicLogicalQubits ?? logicalCounts.numQubits ?? "-")} />
             <SurfaceMetric label="T factories" value={formatNumber(breakdown.numTfactories ?? "-")} />
           </div>
         </PanelCard>

@@ -32,6 +32,7 @@ def route_circuit_with_target(circuit: QuantumCircuit, target: Any, topology: di
     swap_insertions = 0
     routed_two_qubit_ops = 0
     direct_two_qubit_ops = 0
+    stripped_barriers = 0
     path_lengths: list[int] = []
 
     for instruction in circuit.data:
@@ -40,13 +41,17 @@ def route_circuit_with_target(circuit: QuantumCircuit, target: Any, topology: di
         qargs = [circuit.find_bit(qubit).index for qubit in instruction.qubits]
         cargs = [circuit.find_bit(clbit).index for clbit in instruction.clbits]
 
+        if op_name == "barrier":
+            stripped_barriers += 1
+            continue
+
         if len(qargs) > 2:
             raise CompilerError(
                 f"Pandora-native routing currently supports one- and two-qubit operations only. "
                 f"Encountered '{operation.name}' on {len(qargs)} qubits."
             )
 
-        if op_name not in supported_operations and op_name not in {"barrier", "measure"}:
+        if op_name not in supported_operations and op_name != "measure":
             raise CompilerError(
                 f"Pandora-native routing cannot lower unsupported target operation '{operation.name}'."
             )
@@ -109,6 +114,7 @@ def route_circuit_with_target(circuit: QuantumCircuit, target: Any, topology: di
             "topology_type": topology["topology_type"],
             "topology_qubits": topology["number_of_qubits"],
             "routing_swaps": swap_insertions,
+            "stripped_barriers": stripped_barriers,
             "routed_two_qubit_ops": routed_two_qubit_ops,
             "direct_two_qubit_ops": direct_two_qubit_ops,
             "max_routing_path_length": max(path_lengths, default=1),

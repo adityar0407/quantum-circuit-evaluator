@@ -207,7 +207,7 @@ a {
 }
 
 .landing-hero {
-  grid-template-columns: minmax(0, 1.3fr) minmax(320px, 0.7fr);
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .landing-hero-copy,
@@ -244,7 +244,6 @@ a {
 }
 
 .landing-hero-copy h1 {
-  max-width: 12ch;
   font-size: clamp(2.6rem, 4.5vw, 4.5rem);
   line-height: 1;
   text-transform: none;
@@ -267,9 +266,23 @@ a {
   flex-wrap: wrap;
 }
 
+.landing-overview-section {
+  display: grid;
+  gap: var(--space-5);
+  padding: 28px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--bg-panel);
+}
+
+.landing-overview-header {
+  display: flex;
+  align-items: center;
+}
+
 .landing-research-strip {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-4);
   margin-top: var(--space-4);
 }
@@ -298,6 +311,8 @@ a {
 }
 
 .landing-shell {
+  display: grid;
+  gap: 40px;
   position: relative;
 }
 
@@ -636,10 +651,223 @@ a {
   max-width: 760px;
 }
 
+.docs-section-card {
+  display: grid;
+  gap: var(--space-4);
+  width: min(100%, 1120px);
+  max-width: 1120px;
+  padding: 28px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--bg-panel);
+}
+
+.docs-hero-card {
+  max-width: 960px;
+}
+
+.docs-section-card h1,
+.docs-section-card h2 {
+  margin: 0;
+  font-size: 2rem;
+  line-height: 1.08;
+  letter-spacing: -0.03em;
+}
+
+.docs-section-card h2 {
+  font-size: 1.6rem;
+}
+
+.docs-prose {
+  display: grid;
+  gap: var(--space-4);
+  max-width: 78ch;
+}
+
+.docs-prose p,
+.docs-muted {
+  margin: 0;
+  color: var(--text-soft);
+  line-height: 1.7;
+}
+
+.docs-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.docs-link-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 18px;
+  border: 1px solid var(--primary-strong);
+  border-radius: 0.25rem;
+  background: var(--primary);
+  color: var(--text-inverse);
+  font-size: 0.92rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  text-decoration: none;
+}
+
+.docs-link-button:hover {
+  box-shadow: 0 0 0 1px rgba(74, 124, 89, 0.22);
+}
+
+.docs-architecture-flow {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  align-items: stretch;
+  gap: var(--space-2);
+}
+
+.docs-flow-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.docs-flow-item span {
+  min-height: 76px;
+  display: grid;
+  place-items: center;
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--bg-panel-2);
+  color: var(--text);
+  font-weight: 800;
+  text-align: center;
+  line-height: 1.15;
+}
+
+.docs-flow-item i {
+  width: 18px;
+  height: 1px;
+  background: var(--primary);
+  font-style: normal;
+}
+
+.docs-grid {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.docs-grid.two-column {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.docs-detail-card,
+.docs-route-card,
+.docs-function-group,
+.docs-function-card,
+.docs-glossary-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--bg-panel-2);
+}
+
+.docs-detail-card,
+.docs-route-card,
+.docs-function-group,
+.docs-glossary-card {
+  padding: var(--space-5);
+}
+
+.docs-detail-card,
+.docs-function-group,
+.docs-glossary-card {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.docs-detail-card h3,
+.docs-function-group h3,
+.docs-glossary-card h3 {
+  margin: 0;
+  font-size: 1.08rem;
+  letter-spacing: -0.01em;
+}
+
+.docs-detail-card p {
+  margin: 0;
+  color: var(--text-soft);
+  line-height: 1.6;
+}
+
+.docs-detail-card dl,
+.docs-function-card dl,
+.docs-glossary-card dl {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+}
+
+.docs-detail-card dt,
+.docs-function-card dt,
+.docs-glossary-card dt {
+  margin-bottom: var(--space-1);
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.docs-detail-card dd,
+.docs-function-card dd,
+.docs-glossary-card dd {
+  margin: 0;
+  color: var(--text-soft);
+  line-height: 1.55;
+}
+
+.docs-route-list,
+.docs-function-list {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.docs-route-card {
+  display: grid;
+  grid-template-columns: minmax(190px, 0.8fr) minmax(180px, 0.8fr) minmax(0, 1.6fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.docs-route-card code,
+.docs-function-card code {
+  color: var(--primary-strong);
+  font-weight: 800;
+}
+
+.docs-route-card p,
+.docs-function-card p {
+  margin: 0;
+  color: var(--text-soft);
+  line-height: 1.6;
+}
+
+.docs-function-card {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--bg-panel);
+}
+
+.docs-function-card dl {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .guide-stage-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 28px;
+  gap: 48px;
 }
 
 .guide-stage-card,
@@ -859,6 +1087,12 @@ a {
   align-items: center;
   gap: 20px;
   flex-wrap: wrap;
+}
+
+.landing-cta-card .guide-cta-actions {
+  flex: 0 0 auto;
+  margin-left: var(--space-8);
+  justify-content: flex-end;
 }
 
 .guide-cta-actions button {
@@ -1951,9 +2185,26 @@ a {
   .credits-doc-card,
   .framework-row,
   .dataset-grid,
+  .docs-grid.two-column,
+  .docs-route-card,
+  .docs-function-card dl,
   .guide-stage-grid,
   .guide-signal-row {
     grid-template-columns: 1fr;
+  }
+
+  .docs-architecture-flow {
+    grid-template-columns: 1fr;
+  }
+
+  .docs-flow-item {
+    grid-template-columns: 1fr;
+  }
+
+  .docs-flow-item i {
+    width: 1px;
+    height: 18px;
+    justify-self: center;
   }
 
   .architecture-form-grid,
@@ -1970,6 +2221,13 @@ a {
     flex-direction: column;
     align-items: stretch;
     padding: 28px;
+  }
+
+  .landing-cta-card .guide-cta-actions {
+    flex: initial;
+    margin-left: 0;
+    justify-content: flex-start;
+    width: 100%;
   }
 
   .landing-footer-cta {
@@ -2044,17 +2302,28 @@ a {
     padding: 22px;
   }
 
+  .docs-section-card {
+    padding: 20px;
+  }
+
   .guide-overview-header h1,
+  .docs-section-card h1,
   .guide-stage-card h2,
   .guide-cta-card h2 {
     font-size: 2rem;
+  }
+
+  .docs-section-card h2 {
+    font-size: 1.45rem;
   }
 
   .guide-cta-actions {
     width: 100%;
   }
 
-  .guide-cta-actions button {
+  .guide-cta-actions button,
+  .docs-actions button,
+  .docs-link-button {
     width: 100%;
     min-width: 0;
   }

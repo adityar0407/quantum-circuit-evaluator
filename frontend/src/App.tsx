@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowRight, Play, RotateCcw } from "lucide-react";
+import { ArrowRight, BarChart3, Cpu, PanelsTopLeft, Play, RotateCcw } from "lucide-react";
 import { fetchArchitectureCapabilities, fetchResourceCapabilities, previewTarget, transpileCircuit, validateCircuit } from "./api/client";
 import type {
   ArchitecturePreset,
@@ -19,7 +19,7 @@ import { EstimationStage } from "./components/tool/EstimationStage";
 import { ResultsStage } from "./components/tool/ResultsStage";
 import { ToolShell } from "./components/tool/ToolShell";
 import { SectionLabel } from "./components/tool/ToolPrimitives";
-import { GuidePage } from "./pages/GuidePage";
+import { DocsPage } from "./pages/GuidePage";
 import {
   buildProfile,
   cloneEstimationProfiles,
@@ -32,9 +32,43 @@ import {
 } from "./state/defaults";
 
 type WorkStatus = "idle" | "loading" | "ready" | "error";
-type AppView = "landing" | "credits" | "guide" | "tool";
+type AppView = "landing" | "credits" | "docs" | "tool";
 type ToolView = "circuit" | "architecture" | "estimation" | "results";
 type ActionState = "idle" | "loading" | "success" | "error";
+
+type LandingStageCard = {
+  eyebrow: string;
+  title: string;
+  summary: string;
+  variant: "intake" | "mapping" | "estimation";
+  active?: boolean;
+  icon: typeof PanelsTopLeft;
+};
+
+const landingStageCards: LandingStageCard[] = [
+  {
+    eyebrow: "Stage one",
+    title: "Circuit Intake",
+    summary: "Import the circuit, inspect the instruction mix, and establish a clean baseline before hardware mapping begins.",
+    variant: "intake",
+    icon: PanelsTopLeft,
+  },
+  {
+    eyebrow: "Current focus",
+    title: "Architecture Mapping",
+    summary: "Map the circuit onto the selected hardware topology and compiler path while enforcing connectivity, routing, and modality constraints.",
+    variant: "mapping",
+    active: true,
+    icon: Cpu,
+  },
+  {
+    eyebrow: "Stage three",
+    title: "Resource Estimation",
+    summary: "Translate the compiled result into fault-tolerant overhead, logical-qubit counts, runtime, and QEC-driven cost signals.",
+    variant: "estimation",
+    icon: BarChart3,
+  },
+];
 
 function cloneConfig(config: TargetConfig): TargetConfig {
   return JSON.parse(JSON.stringify(config)) as TargetConfig;
@@ -210,8 +244,8 @@ function resolveViewFromHash(hash: string): AppView {
   if (key === "credits") {
     return "credits";
   }
-  if (key === "guide") {
-    return "guide";
+  if (key === "docs" || key === "guide") {
+    return "docs";
   }
   if (["tool", "circuit", "architecture", "estimation", "results"].includes(key)) {
     return "tool";
@@ -295,8 +329,8 @@ function TopToolbar({ view }: { view: AppView }) {
           <a href="#home" className={view === "landing" ? "active" : undefined}>
             Home
           </a>
-          <a href="#guide" className={view === "guide" ? "active" : undefined}>
-            Overview
+          <a href="#docs" className={view === "docs" ? "active" : undefined}>
+            Docs
           </a>
           <a href="#tool" className={view === "tool" ? "active" : undefined}>
             Tool
@@ -322,7 +356,7 @@ function AppFooter({ view, status }: { view: AppView; status?: string; message?:
         </div>
         <nav className="app-footer-links">
           <a href="#credits">Credits</a>
-          <a href="#guide">Documentation</a>
+          <a href="#docs">Documentation</a>
         </nav>
       </div>
     </footer>
@@ -335,61 +369,87 @@ function LandingPage() {
       <section className="landing-hero">
         <div className="landing-hero-copy">
           <SectionLabel>Local research workspace</SectionLabel>
-          <h1>Evaluate compiled circuits against the hardware assumptions that actually matter.</h1>
+          <h1>Evaluate quantum circuits under the hardware assumptions you specify.</h1>
           <p>
-            Compare how an OpenQASM circuit behaves across architecture presets, compiler paths, and fault-tolerant
-            estimation assumptions. Inspect routing pressure, resource overhead, and architecture-specific tradeoffs
-            before committing to a hardware profile.
+            QCE helps researchers test how the same circuit behaves across compiler paths, connectivity models, and fault-tolerant estimation settings before committing to one hardware profile. 
           </p>
           <div className="landing-actions">
             <button type="button" onClick={() => (window.location.hash = "tool")}>
               Launch evaluator <ArrowRight aria-hidden="true" />
             </button>
-            <button type="button" className="secondary" onClick={() => (window.location.hash = "guide")}>
-              Read workflow overview
+            <button type="button" className="secondary" onClick={() => (window.location.hash = "docs")}>
+              Read docs
             </button>
           </div>
         </div>
-        <div className="landing-hero-panel">
-          <SectionLabel>What the workspace gives you</SectionLabel>
-          <div className="landing-points">
-            <article>
-              <strong>Architecture-aware comparison</strong>
-              <p>Preview coupling constraints and topology assumptions before estimation, using built-in presets or custom target settings.</p>
-            </article>
-            <article>
-              <strong>Compilation-first reasoning</strong>
-              <p>Validate the circuit, inspect the gate mix, and carry the compiled artifact forward into the estimation path instead of skipping directly to abstract metrics.</p>
-            </article>
-            <article>
-              <strong>Reproducible run records</strong>
-              <p>Keep architecture, compiler, and estimator assumptions tied to each run so exported comparisons stay traceable.</p>
-            </article>
-          </div>
+      </section>
+
+      <section className="landing-overview-section">
+        <div className="landing-overview-header">
+          <SectionLabel>Overview</SectionLabel>
+        </div>
+        <div className="guide-stage-grid">
+          {landingStageCards.map((card) => {
+            const Icon = card.icon;
+            return (
+              <article
+                key={card.title}
+                className={`guide-stage-card ${card.active ? "is-active" : ""}`}
+              >
+                <div className="guide-stage-card-header">
+                  <div className={`guide-stage-icon ${card.active ? "is-active" : ""}`}>
+                    <Icon aria-hidden="true" />
+                  </div>
+                  <span>{card.eyebrow}</span>
+                </div>
+                <h2>{card.title}</h2>
+                <p>{card.summary}</p>
+                <div className={`guide-stage-diagram ${card.variant}`}>
+                  {card.variant === "intake" ? (
+                    <div className="guide-diagram-lines" aria-hidden="true">
+                      <div><span /><i /></div>
+                      <div><span /><i className="is-bright" /></div>
+                      <div><span /><i /></div>
+                    </div>
+                  ) : null}
+                  {card.variant === "mapping" ? (
+                    <div className="guide-diagram-nodes" aria-hidden="true">
+                      <div className="node small"><span /></div>
+                      <i />
+                      <div className="node large"><span /></div>
+                      <i />
+                      <div className="node small muted"><span /></div>
+                    </div>
+                  ) : null}
+                  {card.variant === "estimation" ? (
+                    <div className="guide-diagram-bars" aria-hidden="true">
+                      <span />
+                      <span />
+                      <span className="highlight" />
+                      <span />
+                      <span />
+                    </div>
+                  ) : null}
+                </div>
+              </article>
+            );
+          })}
         </div>
       </section>
 
-      <section className="landing-research-strip">
-        <article className="landing-research-card">
-          <SectionLabel>Typical use</SectionLabel>
-          <h2>Test one circuit across multiple hardware assumptions.</h2>
-          <p>Start with a circuit, validate it once, then compare how compilation overhead and QRE translation shift when connectivity, modality, or error-correction assumptions change.</p>
-        </article>
-        <article className="landing-research-card">
-          <SectionLabel>Why it exists</SectionLabel>
-          <h2>Turn architecture choices into visible tradeoffs.</h2>
-          <p>The workspace is built for researchers who need to reason about routing pressure, physical width, and compiled depth without hiding the assumptions that produced those numbers.</p>
-        </article>
-      </section>
-
-      <section className="landing-footer-cta">
+      <section className="guide-cta-card landing-cta-card">
         <div>
-          <h2>Open the workspace and start with the circuit.</h2>
-          <p>Validate the input first, inspect the gate mix, then move into architecture preview and estimation once the circuit is structurally ready.</p>
+          <h2>Ready to begin your analysis?</h2>
+          <p>Open the tool workflow and move through circuit setup, architecture mapping, and estimation one stage at a time.</p>
         </div>
-        <div className="landing-actions">
-          <button type="button" onClick={() => (window.location.hash = "tool")}>Get started now</button>
-          <button type="button" className="secondary" onClick={() => (window.location.hash = "guide")}>See stage-by-stage guide</button>
+        <div className="guide-cta-actions">
+          <button type="button" className="secondary" onClick={() => (window.location.hash = "docs")}>
+            View documentation
+          </button>
+          <button type="button" onClick={() => (window.location.hash = "tool")}>
+            Initialize pipeline
+            <ArrowRight aria-hidden="true" />
+          </button>
         </div>
       </section>
     </main>
@@ -844,11 +904,11 @@ export function App() {
       </>
     );
   }
-  if (view === "guide") {
+  if (view === "docs") {
     return (
         <>
         <TopToolbar view={view} />
-        <GuidePage />
+        <DocsPage />
         <AppFooter view={view} />
       </>
     );

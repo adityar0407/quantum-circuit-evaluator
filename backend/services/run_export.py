@@ -90,6 +90,9 @@ def build_reproducible_run_export(
             "error_budget": qre_assumptions.get("max_error"),
             "qdk_version": qre_assumptions.get("qdk_version") or metrics.get("qdk_version"),
             "estimator_mode": qre_assumptions.get("estimator_mode") or metrics.get("qre_mode"),
+            "native_qre_version": qre_assumptions.get("native_qre_version") or metrics.get("native_qre_version"),
+            "selected_code_distance": qre_assumptions.get("selected_code_distance") or metrics.get("selected_code_distance"),
+            "distance_selection": qre_assumptions.get("distance_selection") or metrics.get("distance_selection"),
             "qre_transform": qre_assumptions.get("qre_transform"),
         },
         "results": {
@@ -103,7 +106,7 @@ def build_reproducible_run_export(
             "Remote operations are unsupported by native QRE and fail rather than being localized or silently priced.",
             "Network profile metadata is carried for traceability but is not priced in native QRE estimates.",
             "Factory configuration and PSSPC settings are not separately exposed by the current qdk.qre.Trace estimate path.",
-            "For QDK GateBased, separate 1Q, 2Q, and measurement errors are reduced to one aggregate error_rate using max(...).",
+            "For QDK GateBased, separate 1Q, SX, 2Q, and measurement errors are reduced to one aggregate error_rate using max(...).",
         ],
         "reproduction": {
             "pipeline": "input QASM -> Qiskit/Pandora -> LogicalIR -> qdk.qre.Trace -> LatticeSurgery -> Trace.estimate",

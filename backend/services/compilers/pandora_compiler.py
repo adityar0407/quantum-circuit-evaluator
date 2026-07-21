@@ -8,8 +8,11 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from qiskit import qasm2
+from qiskit import QuantumCircuit, transpile
+from qiskit.transpiler import PassManager
+from qiskit.transpiler.passes import RemoveBarriers
 
+from backend.IR.qasm import export_circuit_to_qasm
 from backend.services.circuit_service import circuit_from_qasm
 from backend.services.compilers.base import CompilationResult, CompilerBackendUnavailable, CompilerError
 from backend.services.compilers.pandora_router import route_circuit_with_target
@@ -43,10 +46,11 @@ class PandoraCompiler:
         topology = export_target_topology(target)
         self._ensure_supported_topology(topology)
 
-        legalized = route_circuit_with_target(circuit, target, topology)
+        normalized_circuit, normalization_artifacts = _normalize_for_pandora_routing(circuit, topology)
+        legalized = route_circuit_with_target(normalized_circuit, target, topology)
         legalized_circuit = legalized.circuit
         legalization_artifacts = legalized.artifacts
-        legalized_qasm = qasm2.dumps(legalized_circuit)
+        legalized_qasm = export_circuit_to_qasm(legalized_circuit)
 
         support_scan = self._support_scan(legalized_qasm)
         unsupported_operations = support_scan.get("unsupported_operations", [])
@@ -60,7 +64,7 @@ class PandoraCompiler:
             )
 
         try:
-            use_database = self._database_is_available()
+            use_database = self._database_is_available() and _database_mode_supported_for_circuit(legalized_circuit)
             completed = subprocess.run(
                 [str(self.python_path), str(self.runner_path)],
                 input=json.dumps(
@@ -95,8 +99,11 @@ class PandoraCompiler:
         artifacts.setdefault("database_mode", bool(artifacts.get("database_enabled")))
         artifacts.setdefault("rewrite_passes", artifacts.get("optimization_passes", []))
         artifacts.setdefault("unsupported_operations", [])
+        if not use_database and "database_error" not in artifacts:
+            artifacts.setdefault("database_skipped_reason", _database_skip_reason(legalized_circuit))
         artifacts["target_topology"] = topology
         artifacts["topology_aware"] = True
+        artifacts["basis_normalization"] = normalization_artifacts
         artifacts["topology_lowering"] = legalization_artifacts
         artifacts["topology_validation"] = topology_validation
         artifacts["support_scan"] = support_scan
@@ -170,6 +177,18 @@ class PandoraCompiler:
                 "and ran conservative cancellation rewrites before reconstructing Qiskit output."
             ]
 
+        if artifacts.get("database_error"):
+            return [
+                "Pandora legalized the circuit against the selected FTarget topology and completed support checks, "
+                f"but database-backed rewrites were skipped because Pandora database mode failed: {artifacts['database_error']}."
+            ]
+
+        if artifacts.get("database_skipped_reason"):
+            return [
+                "Pandora legalized the circuit against the selected FTarget topology and completed support checks, "
+                f"but database-backed rewrites were skipped: {artifacts['database_skipped_reason']}."
+            ]
+
         return [
             "Pandora legalized the circuit against the selected FTarget topology and completed support checks, "
             "but PostgreSQL was not reachable so database-backed rewrite passes were skipped."
@@ -194,3 +213,48 @@ def _removed_operations(original_circuit, compiled_circuit) -> dict[str, int]:
     compiled_counts = Counter({name: int(count) for name, count in compiled_circuit.count_ops().items()})
     removed = original_counts - compiled_counts
     return dict(removed)
+
+
+def _normalize_for_pandora_routing(circuit: QuantumCircuit, topology: dict[str, Any]) -> tuple[QuantumCircuit, dict[str, Any]]:
+    basis_gates = sorted(
+        {
+            str(name).lower()
+            for name in topology.get("native_gate_set", [])
+            if str(name).lower() not in {"barrier"}
+        }
+        | {"measure"}
+    )
+    before_counts = dict(circuit.count_ops())
+    try:
+        translated = transpile(
+            circuit,
+            basis_gates=basis_gates,
+            optimization_level=1,
+            seed_transpiler=1738,
+        )
+        normalized = PassManager([RemoveBarriers()]).run(translated)
+    except Exception as exc:
+        raise CompilerError(
+            "Pandora basis normalization failed before topology routing. "
+            f"Target basis: {', '.join(basis_gates)}. {exc}"
+        ) from exc
+
+    after_counts = dict(normalized.count_ops())
+    return normalized, {
+        "status": "completed",
+        "basis_gates": basis_gates,
+        "before_operation_counts": before_counts,
+        "after_operation_counts": after_counts,
+        "removed_barriers": int(before_counts.get("barrier", 0)),
+        "decomposed_operations": sorted(set(before_counts) - set(after_counts) - {"barrier"}),
+    }
+
+
+def _database_mode_supported_for_circuit(circuit: QuantumCircuit) -> bool:
+    return int(circuit.count_ops().get("measure", 0)) == 0
+
+
+def _database_skip_reason(circuit: QuantumCircuit) -> str:
+    if int(circuit.count_ops().get("measure", 0)) > 0:
+        return "Pandora database reconstruction cannot map measurement gate code 14 back to Qiskit in the installed Pandora package."
+    return "Pandora database was not reachable."

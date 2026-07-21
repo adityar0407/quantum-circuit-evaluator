@@ -51,6 +51,7 @@ _LOGICAL_SURFACE_PROFILE = {
         "HGate": {"logical_weight": 1, "logical_preference": 1},
         "TGate": {"logical_weight": 2, "logical_preference": 1.2},
         "XGate": {"logical_weight": 1, "logical_preference": 1},
+        "RZGate": {"logical_weight": 0.5, "logical_preference": 0.8},
     },
     "two_q_gates": {
         "CXGate": {"logical_weight": 3, "routing_preference": 2},

@@ -26,10 +26,12 @@ class PhysicalHardwareProfile:
     physical_profile_mode: str = "built_in"
     qdk_hardware_model: str = "gate_based"
     one_qubit_gate_error_rate: float = 1e-4
+    sx_gate_error_rate: float | None = None
     two_qubit_gate_error_rate: float = 1e-3
     measurement_error_rate: float = 2e-4
     idle_error_rate: float = 1e-5
     one_qubit_gate_time: float = 50e-9
+    sx_gate_time: float | None = None
     two_qubit_gate_time: float = 300e-9
     measurement_time: float = 800e-9
     cycle_time: float = 1e-6
