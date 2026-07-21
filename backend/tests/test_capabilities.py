@@ -24,10 +24,12 @@ class TestCapabilitiesRoutes(unittest.TestCase):
                 "backend.services.resource_estimators.physical_qdk_adapter": None,
             },
         ):
-            physical_hardware, qec_models = _load_qre_capabilities()
+            physical_hardware, qec_models, native_operations = _load_qre_capabilities()
 
         self.assertGreater(len(physical_hardware["verified_builtin_models"]), 0)
         self.assertIn("surface_code", qec_models)
+        self.assertIn("SX", native_operations)
+        self.assertIn("SWAP", native_operations)
         self.assertTrue(
             any("QDK is unavailable" in note for note in physical_hardware["mapping_notes"])
         )
@@ -37,6 +39,8 @@ class TestCapabilitiesRoutes(unittest.TestCase):
 
         self.assertIn("native_operations", payload)
         self.assertIn("CX", payload["native_operations"])
+        self.assertIn("SX", payload["native_operations"])
+        self.assertIn("SWAP", payload["native_operations"])
 
 
 if __name__ == "__main__":

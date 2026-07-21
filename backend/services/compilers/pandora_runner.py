@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+import traceback
 from collections import Counter
 from contextlib import suppress
 
@@ -138,7 +139,19 @@ def main() -> int:
     else:
         result = run_translation_mode(payload)
     if mode == "translate" and payload.get("use_database"):
-        result.update(asyncio.run(run_database_mode(payload)))
+        try:
+            result.update(asyncio.run(run_database_mode(payload)))
+        except Exception as exc:
+            result.update(
+                {
+                    "database_enabled": False,
+                    "database_mode": False,
+                    "database_error": f"{type(exc).__name__}: {exc}",
+                    "database_traceback": traceback.format_exc(),
+                    "translation_only": True,
+                    "optimization_passes": [],
+                }
+            )
 
     json.dump(result, sys.stdout)
     return 0

@@ -77,6 +77,12 @@ class TestNativeQreEstimator(unittest.TestCase):
         self.assertEqual(result["metrics"]["qre_input_source"], "native_trace")
         self.assertGreater(result["metrics"]["physical_qubits"], 0)
         self.assertGreater(result["metrics"]["runtime"], 0)
+        self.assertGreater(result["metrics"]["rqops"], 0)
+        self.assertGreater(result["metrics"]["logical_counts"]["numQubits"], 0)
+        self.assertEqual(
+            result["metrics"]["physical_counts"]["physicalQubits"],
+            result["metrics"]["physical_qubits"],
+        )
         self.assertIn("qdk_version", result["metrics"])
 
     def test_h_cx_measure_works_without_qiskit_qre_or_qiskit_reconstruction(self) -> None:
@@ -89,6 +95,30 @@ class TestNativeQreEstimator(unittest.TestCase):
 
         self.assertEqual(result["resource_estimator"], "native_qre")
         self.assertEqual(result["metrics"]["native_qre_trace"]["mapped_operation_count"], 4)
+
+    def test_local_swap_is_lowered_to_three_cx_operations(self) -> None:
+        circuit = QuantumCircuit(2)
+        circuit.swap(0, 1)
+        target = build_target(TARGET_CONFIG)
+        logical_ir = build_logical_ir(circuit, target, compiler="qiskit_ftarget")
+        compilation = CompilationResult(
+            compiler="qiskit_ftarget",
+            original_circuit=circuit,
+            compiled_circuit=circuit,
+            target=target,
+            estimation_context=build_estimation_context(target),
+            logical_ir=logical_ir,
+        )
+
+        metrics = NativeQreEstimator().estimate(compilation)
+        mapped = metrics["native_qre_trace"]["mapped_operations"]
+        trace = json.loads(metrics["native_qre_lattice_surgery"]["trace_json"])
+
+        self.assertEqual(mapped[0]["operation"], "SWAP")
+        self.assertEqual(mapped[0]["qre_instruction"], "CX_X3")
+        self.assertEqual(mapped[0]["qre_expansion"], ["CX", "CX", "CX"])
+        self.assertEqual([operation["instruction"] for operation in trace["operations"]], ["CX", "CX", "CX"])
+        self.assertNotIn("SWAP", [operation["instruction"] for operation in trace["operations"]])
 
     def test_custom_qdk_qec_model_parameters_are_used(self) -> None:
         result = compile_qasm(
@@ -113,6 +143,28 @@ class TestNativeQreEstimator(unittest.TestCase):
         self.assertEqual(qec_model["name"], "surface_code")
         self.assertEqual(qec_model["parameters"]["distance"], 5)
         self.assertEqual(qec_model["attributes"]["distance"], 5)
+        self.assertEqual(result["metrics"]["selected_code_distance"], 5)
+        self.assertEqual(result["metrics"]["distance_selection"]["mode"], "fixed")
+
+    def test_auto_distance_increases_for_tighter_logical_failure_budget(self) -> None:
+        loose = compile_qasm(
+            H_MEASURE_QASM,
+            TARGET_CONFIG,
+            compiler_backend="qiskit_ftarget",
+            estimation_profiles={"qec": {"error_budget": 1e-2}},
+        )
+        tight = compile_qasm(
+            H_MEASURE_QASM,
+            TARGET_CONFIG,
+            compiler_backend="qiskit_ftarget",
+            estimation_profiles={"qec": {"error_budget": 1e-8}},
+        )
+
+        self.assertEqual(loose["metrics"]["distance_selection"]["mode"], "auto")
+        self.assertEqual(tight["metrics"]["distance_selection"]["mode"], "auto")
+        self.assertGreater(tight["metrics"]["selected_code_distance"], loose["metrics"]["selected_code_distance"])
+        self.assertLessEqual(tight["metrics"]["logical_error"], 1e-8)
+        self.assertGreater(tight["metrics"]["physical_qubits"], loose["metrics"]["physical_qubits"])
 
     def test_verified_builtin_physical_models_work(self) -> None:
         for model_name in ("gate_based", "neutral_atom"):
@@ -264,6 +316,27 @@ class TestNativeQreEstimator(unittest.TestCase):
         self.assertNotEqual(low_params["error_rate"], high_params["error_rate"])
         self.assertNotEqual(low_params["two_qubit_gate_time"], high_params["two_qubit_gate_time"])
 
+    def test_sx_physical_parameters_are_configurable(self) -> None:
+        params = physical_profile_to_qdk_model(
+            PhysicalHardwareProfile(
+                physical_profile_mode="custom",
+                qdk_hardware_model="gate_based",
+                one_qubit_gate_error_rate=1e-4,
+                sx_gate_error_rate=5e-5,
+                two_qubit_gate_error_rate=1e-3,
+                measurement_error_rate=2e-4,
+                idle_error_rate=1e-5,
+                one_qubit_gate_time=50e-9,
+                sx_gate_time=25e-9,
+                two_qubit_gate_time=300e-9,
+                measurement_time=800e-9,
+                cycle_time=1e-6,
+            )
+        ).metadata["normalized_qdk_parameters"]
+
+        self.assertEqual(params["sx_gate_error_rate"], 5e-5)
+        self.assertEqual(params["sx_gate_time"], 25)
+
     def test_invalid_qdk_qec_model_fails_clearly(self) -> None:
         with self.assertRaisesRegex(Exception, "does not support QEC model"):
             compile_qasm(
@@ -305,6 +378,7 @@ class TestNativeQreEstimator(unittest.TestCase):
         circuit.z(0)
         circuit.s(0)
         circuit.sdg(0)
+        circuit.sx(0)
         circuit.t(0)
         circuit.tdg(0)
         circuit.rx(0.25, 0)
@@ -330,8 +404,9 @@ class TestNativeQreEstimator(unittest.TestCase):
 
         self.assertEqual(
             mapped_operations,
-            ["X", "Z", "S", "SDG", "T", "TDG", "RX", "RY", "RZ", "RESET", "MEASURE"],
+            ["X", "Z", "S", "SDG", "SX", "T", "TDG", "RX", "RY", "RZ", "RESET", "MEASURE"],
         )
+        self.assertIn("SX", qre_instructions)
         self.assertIn("MEAS_RESET_Z", qre_instructions)
         self.assertIn("T_DAG", qre_instructions)
         self.assertGreater(metrics["physical_qubits"], 0)
@@ -387,6 +462,9 @@ class TestNativeQreEstimator(unittest.TestCase):
         self.assertIn("physical_hardware", export["estimation_assumptions"])
         self.assertIn("normalized_qdk_hardware_parameters", export["estimation_assumptions"])
         self.assertIn("qec_model", export["estimation_assumptions"])
+        self.assertIn("native_qre_version", export["estimation_assumptions"])
+        self.assertIn("implementation_hash", export["estimation_assumptions"]["native_qre_version"])
+        self.assertIn("distance_selection", export["estimation_assumptions"])
         self.assertEqual(export["results"]["physical_qubits"], result["metrics"]["physical_qubits"])
         self.assertTrue(any("Remote operations are unsupported" in item for item in export["limitations"]))
 

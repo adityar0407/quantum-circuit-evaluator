@@ -5,7 +5,6 @@ from pathlib import Path
 from qiskit import QuantumCircuit
 from qiskit import qasm2
 
-
 def ingest_qasm_string(qasm_string: str) -> str:
     return qasm_string.strip()
 
@@ -26,4 +25,10 @@ def validate_qasm(qasm_string: str) -> tuple[bool, QuantumCircuit | str]:
 
 
 def export_circuit_to_qasm(circuit: QuantumCircuit) -> str:
-    return qasm2.dumps(circuit)
+    if hasattr(circuit, "qasm"):
+        return circuit.qasm()
+
+    try:
+        return qasm2.dumps(circuit)
+    except Exception as exc:
+        raise ValueError("The installed Qiskit version cannot export OPENQASM 2 from QuantumCircuit.") from exc
