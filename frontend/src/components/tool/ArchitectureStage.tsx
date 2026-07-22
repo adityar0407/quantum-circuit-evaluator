@@ -139,6 +139,11 @@ function GateTable({
   const gates = getProfileGroup(config, group);
   const entries = Object.entries(gates);
   const fields = group === "sq_gates" ? ["logical_weight", "logical_preference"] : ["logical_weight", "routing_preference"];
+  const fieldLabels: Record<string, string> = {
+    logical_weight: "Relative cost",
+    logical_preference: "Selection priority",
+    routing_preference: "Routing priority",
+  };
 
   function updateGate(gateName: string, field: string, value: number) {
     const next = cloneConfig(config);
@@ -155,7 +160,7 @@ function GateTable({
         <div className="gate-row header">
           <span>Gate</span>
           {fields.map((field) => (
-            <span key={field}>{field.replace(/_/g, " ")}</span>
+            <span key={field}>{fieldLabels[field] ?? humanizeKey(field)}</span>
           ))}
         </div>
         {entries.map(([gateName, values]) => (
@@ -379,8 +384,8 @@ export function ArchitectureStage(props: {
             <div className="insight-strip">
               <div className="inline-note">
                 <p>
-                  `FTarget` is the architecture contract the compiler obeys. It defines which qubits may interact, which gate
-                  families are native, and what routing constraints Pandora or Qiskit must respect.
+                  The compiler uses this architecture to determine which qubits can interact, which operations are available,
+                  and when it must reroute the circuit.
                 </p>
               </div>
             </div>
@@ -391,10 +396,10 @@ export function ArchitectureStage(props: {
               </button>
               {showAdvancedArchitecture ? (
                 <div className="advanced-block">
-                  <p className="field-hint">These controls expose the backend graph generator. Leave them alone unless you are intentionally modifying the preset for a custom study.</p>
+                  <p className="field-hint">Change these settings to build a custom qubit layout instead of using the selected preset.</p>
                   <div className="form-grid">
                     <label className="field">
-                      <span>Backend graph model</span>
+                      <span>Layout pattern</span>
                       <select value={String(topology.type ?? "tiled_k_nearest")} onChange={(event) => onUpdateTopology("type", event.target.value)}>
                         <option value="tiled_k_nearest">Nearest-neighbor tile layout</option>
                         <option value="heavy_hex">Heavy-hex graph</option>
@@ -423,8 +428,8 @@ export function ArchitectureStage(props: {
             </div>
           </PanelCard>
 
-          <PanelCard label="Compiler basis" title={modalityPresets[selectedModality].label} description={modalityPresets[selectedModality].description}>
-            <p className="field-hint">These weights bias the compiler toward cheaper native operations for the selected hardware family.</p>
+          <PanelCard label="Operation costs" title={modalityPresets[selectedModality].label} description={modalityPresets[selectedModality].description}>
+            <p className="field-hint">Lower costs make the compiler favor an operation when more than one valid choice exists.</p>
             <div className="form-grid">
               {modalityPresets[selectedModality].fields.map((field) => (
                 <NumericField
@@ -473,10 +478,10 @@ export function ArchitectureStage(props: {
             </div>
           </PanelCard>
 
-          <PanelCard label="Fault-tolerant estimation profile" title="Physical and QEC assumptions">
-            <p className="body-copy">Physical hardware and QEC settings are configured on the next screen so the compilation stage stays focused on target selection, routing, and legal interactions.</p>
+          <PanelCard label="Next: resource estimation" title="Hardware and error-correction values">
+            <p className="body-copy">The next stage adds hardware performance and error-correction values after the circuit has been compiled for this architecture.</p>
             <div className="inline-note">
-              <p>Use the `Proceed to Estimation` action once the architecture graph and compiler basis look correct.</p>
+              <p>Continue when the architecture layout and operation costs look correct.</p>
             </div>
           </PanelCard>
         </div>
