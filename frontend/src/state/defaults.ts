@@ -25,6 +25,7 @@ type ModalityField = {
 export type QecParameterField = {
   key: string;
   label: string;
+  help?: string;
   type: "number" | "boolean";
   step?: string;
   min?: string;
@@ -33,59 +34,59 @@ export type QecParameterField = {
 export const qecModelOptions: Array<{ key: QecModelKey; label: string; description: string }> = [
   {
     key: "surface_code",
-    label: "SurfaceCode",
-    description: "Default QDK surface-code model.",
+    label: "Standard surface code",
+    description: "Estimates error-correction overhead with the standard surface-code assumptions.",
   },
   {
     key: "surface_code_low_move",
-    label: "SurfaceCodeLowMove",
-    description: "QDK surface-code variant with lower movement overhead.",
+    label: "Surface code, lower movement",
+    description: "Surface-code variant that assumes less movement overhead than the standard model.",
   },
   {
     key: "three_aux",
-    label: "ThreeAux",
-    description: "QDK three-auxiliary-qubit model.",
+    label: "Three auxiliary qubits",
+    description: "Model variant that uses three auxiliary qubits in the error-correction layout.",
   },
   {
     key: "one_dimensional_yoked_surface_code",
-    label: "OneDimensionalYokedSurfaceCode",
-    description: "QDK one-dimensional yoked surface-code model.",
+    label: "1D yoked surface code",
+    description: "Yoked surface-code model for one-dimensional layouts.",
   },
   {
     key: "two_dimensional_yoked_surface_code",
-    label: "TwoDimensionalYokedSurfaceCode",
-    description: "QDK two-dimensional yoked surface-code model.",
+    label: "2D yoked surface code",
+    description: "Yoked surface-code model for two-dimensional layouts.",
   },
 ];
 
 export const qecModelParameterFields: Record<QecModelKey, QecParameterField[]> = {
   surface_code: [
-    { key: "distance", label: "Distance", type: "number", step: "2", min: "1" },
-    { key: "crossing_prefactor", label: "Crossing prefactor", type: "number", step: "any", min: "0" },
-    { key: "error_correction_threshold", label: "EC threshold", type: "number", step: "any", min: "0" },
-    { key: "one_qubit_gate_depth", label: "1Q gate depth", type: "number", step: "1", min: "0" },
-    { key: "two_qubit_gate_depth", label: "2Q gate depth", type: "number", step: "1", min: "0" },
-    { key: "code_cycle_override", label: "Cycle override", type: "number", step: "1", min: "0" },
-    { key: "code_cycle_offset", label: "Cycle offset", type: "number", step: "1", min: "0" },
+    { key: "distance", label: "Code distance", help: "Surface-code protection level. Larger odd values usually increase reliability and physical-qubit cost.", type: "number", step: "2", min: "1" },
+    { key: "crossing_prefactor", label: "Crossing prefactor", help: "Multiplier used by the surface-code failure model when estimating logical error rates.", type: "number", step: "any", min: "0" },
+    { key: "error_correction_threshold", label: "Error-correction threshold", help: "Physical error-rate threshold assumed by this QEC model.", type: "number", step: "any", min: "0" },
+    { key: "one_qubit_gate_depth", label: "Single-qubit gate depth", help: "Number of code cycles assigned to a logical single-qubit gate.", type: "number", step: "1", min: "0" },
+    { key: "two_qubit_gate_depth", label: "Two-qubit gate depth", help: "Number of code cycles assigned to a logical two-qubit gate.", type: "number", step: "1", min: "0" },
+    { key: "code_cycle_override", label: "Force code-cycle count", help: "Optional override for the model's calculated cycles. Leave blank unless you need a fixed cycle count for a controlled experiment.", type: "number", step: "1", min: "0" },
+    { key: "code_cycle_offset", label: "Add code cycles", help: "Extra cycles added after the model calculates the operation cost. Use this for fixed scheduling overhead.", type: "number", step: "1", min: "0" },
   ],
   surface_code_low_move: [
-    { key: "distance", label: "Distance", type: "number", step: "2", min: "1" },
-    { key: "crossing_prefactor", label: "Crossing prefactor", type: "number", step: "any", min: "0" },
-    { key: "error_correction_threshold", label: "EC threshold", type: "number", step: "any", min: "0" },
-    { key: "code_cycle_override", label: "Cycle override", type: "number", step: "1", min: "0" },
-    { key: "code_cycle_offset", label: "Cycle offset", type: "number", step: "1", min: "0" },
+    { key: "distance", label: "Code distance", help: "Surface-code protection level. Larger odd values usually increase reliability and physical-qubit cost.", type: "number", step: "2", min: "1" },
+    { key: "crossing_prefactor", label: "Crossing prefactor", help: "Multiplier used by the surface-code failure model when estimating logical error rates.", type: "number", step: "any", min: "0" },
+    { key: "error_correction_threshold", label: "Error-correction threshold", help: "Physical error-rate threshold assumed by this QEC model.", type: "number", step: "any", min: "0" },
+    { key: "code_cycle_override", label: "Force code-cycle count", help: "Optional override for the model's calculated cycles. Leave blank unless you need a fixed cycle count for a controlled experiment.", type: "number", step: "1", min: "0" },
+    { key: "code_cycle_offset", label: "Add code cycles", help: "Extra cycles added after the model calculates the operation cost. Use this for fixed scheduling overhead.", type: "number", step: "1", min: "0" },
   ],
   three_aux: [
-    { key: "distance", label: "Distance", type: "number", step: "2", min: "1" },
-    { key: "single_rail", label: "Single rail", type: "boolean" },
+    { key: "distance", label: "Code distance", help: "Surface-code protection level. Larger odd values usually increase reliability and physical-qubit cost.", type: "number", step: "2", min: "1" },
+    { key: "single_rail", label: "Use single-rail layout", help: "Switches the model to a single-rail auxiliary-qubit layout.", type: "boolean" },
   ],
   one_dimensional_yoked_surface_code: [
-    { key: "crossing_prefactor", label: "Crossing prefactor", type: "number", step: "any", min: "0" },
-    { key: "error_correction_threshold", label: "EC threshold", type: "number", step: "any", min: "0" },
+    { key: "crossing_prefactor", label: "Crossing prefactor", help: "Multiplier used by the yoked surface-code failure model.", type: "number", step: "any", min: "0" },
+    { key: "error_correction_threshold", label: "Error-correction threshold", help: "Physical error-rate threshold assumed by this QEC model.", type: "number", step: "any", min: "0" },
   ],
   two_dimensional_yoked_surface_code: [
-    { key: "crossing_prefactor", label: "Crossing prefactor", type: "number", step: "any", min: "0" },
-    { key: "error_correction_threshold", label: "EC threshold", type: "number", step: "any", min: "0" },
+    { key: "crossing_prefactor", label: "Crossing prefactor", help: "Multiplier used by the yoked surface-code failure model.", type: "number", step: "any", min: "0" },
+    { key: "error_correction_threshold", label: "Error-correction threshold", help: "Physical error-rate threshold assumed by this QEC model.", type: "number", step: "any", min: "0" },
   ],
 };
 

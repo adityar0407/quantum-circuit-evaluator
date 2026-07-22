@@ -652,14 +652,104 @@ a {
 }
 
 .docs-section-card {
-  display: grid;
+  display: none;
   gap: var(--space-4);
-  width: min(100%, 1120px);
-  max-width: 1120px;
+  width: 100%;
   padding: 28px;
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   background: var(--bg-panel);
+  scroll-margin-top: 96px;
+}
+
+.docs-section-card.is-active {
+  display: grid;
+}
+
+.docs-layout {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: var(--space-6);
+  align-items: start;
+  width: min(100%, 1240px);
+}
+
+.docs-sidebar {
+  position: sticky;
+  top: 104px;
+  display: grid;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--bg-panel);
+}
+
+.docs-sidebar strong {
+  font-size: 0.95rem;
+}
+
+.docs-sidebar nav {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.docs-sidebar button {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-soft);
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  text-decoration: none;
+  line-height: 1.25;
+  cursor: pointer;
+}
+
+.docs-overview-block,
+.docs-section-intro {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.docs-overview-block {
+  margin-top: var(--space-2);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--line);
+}
+
+.docs-overview-block h2,
+.docs-section-intro h3 {
+  margin: 0;
+}
+
+.docs-section-intro h3 {
+  font-size: 1.15rem;
+}
+
+.docs-section-divider {
+  margin-top: var(--space-4);
+  padding-top: var(--space-6);
+  border-top: 1px solid var(--line);
+}
+
+.docs-sidebar button:hover,
+.docs-sidebar button:focus-visible,
+.docs-sidebar button.is-active {
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+}
+
+.docs-content {
+  display: grid;
+  gap: 28px;
+  min-width: 0;
 }
 
 .docs-hero-card {
@@ -862,6 +952,37 @@ a {
 
 .docs-function-card dl {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.docs-term-table {
+  display: grid;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--bg-panel-2);
+}
+
+.docs-term-table > div {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.8fr) minmax(0, 1.4fr);
+  gap: var(--space-4);
+  padding: 14px 16px;
+  border-top: 1px solid var(--line);
+}
+
+.docs-term-table > div:first-child {
+  border-top: 0;
+  background: var(--bg-panel-3);
+}
+
+.docs-term-table code {
+  color: var(--primary-strong);
+  font-weight: 800;
+}
+
+.docs-term-table span {
+  color: var(--text-soft);
+  line-height: 1.5;
 }
 
 .guide-stage-grid {
@@ -1753,6 +1874,24 @@ a {
   display: block;
 }
 
+.qec-parameter small {
+  display: block;
+  margin-top: 8px;
+  color: var(--text-soft);
+  line-height: 1.45;
+}
+
+.assumption-explainer {
+  display: grid;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.assumption-explainer h4,
+.assumption-explainer p {
+  margin: 0;
+}
+
 .target-graph,
 .graph-empty {
   width: 100%;
@@ -2185,12 +2324,22 @@ a {
   .credits-doc-card,
   .framework-row,
   .dataset-grid,
+  .docs-layout,
   .docs-grid.two-column,
   .docs-route-card,
   .docs-function-card dl,
+  .docs-term-table > div,
   .guide-stage-grid,
   .guide-signal-row {
     grid-template-columns: 1fr;
+  }
+
+  .docs-sidebar {
+    position: static;
+  }
+
+  .docs-sidebar nav {
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   }
 
   .docs-architecture-flow {
